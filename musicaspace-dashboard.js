@@ -161,3 +161,85 @@
     } catch(error) { $('#tonalStatus').textContent=`Analysis failed: ${error.message}`; }
   });
 })();
+
+// Supabase Auth: public publishable key only; no secret/service_role key is used.
+(async () => {
+  const SUPABASE_URL = 'https://pyokprmnijoowrpaopyo.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_3oB-xmqTGDPDYYSLXpGPiw_NdH1R0xC';
+  const authStyle = document.createElement('style');
+  authStyle.textContent = `
+    .profile,.top-user{cursor:pointer}.auth-modal{position:fixed;inset:0;z-index:50;display:none;place-items:center;padding:18px;background:#020817bb;backdrop-filter:blur(10px)}
+    .auth-modal.open{display:grid}.auth-card{width:min(410px,100%);border:1px solid #2863aa;border-radius:16px;background:linear-gradient(145deg,#0c2349,#07152e);box-shadow:0 24px 70px #0009;padding:24px;position:relative}.auth-close{position:absolute;right:15px;top:12px;border:0;background:transparent;color:#aac2e6;font-size:22px}.auth-card h2{margin:0 0 6px}.auth-card>p{color:#90a9d1;margin:0 0 18px;font-size:13px}.auth-tabs{display:flex;gap:4px;padding:4px;border-radius:8px;background:#07152e;margin-bottom:14px}.auth-tab{flex:1;border:0;border-radius:6px;background:transparent;color:#91a9ce;padding:8px}.auth-tab.active{background:#1b4f98;color:#fff}.auth-form{display:grid;gap:10px}.auth-form label{color:#b9cceb;font-size:12px}.auth-form input{width:100%;margin-top:5px;border:1px solid #24548e;border-radius:8px;background:#06152e;color:#eff6ff;padding:11px;outline:0}.auth-form input:focus{border-color:#4ec7ff}.auth-submit{border:0;border-radius:8px;background:linear-gradient(100deg,#1fbeff,#7739ff);color:#fff;padding:11px;font-weight:800;margin-top:4px}.auth-google{border:1px solid #315d99;border-radius:8px;background:#0b2044;color:#eaf4ff;padding:10px}.auth-divider{display:flex;align-items:center;gap:8px;color:#6f89b3;font-size:11px;margin:13px 0}.auth-divider:before,.auth-divider:after{content:'';height:1px;background:#1a4274;flex:1}.auth-message{min-height:18px;color:#79e1c2;font-size:12px;margin:8px 0 0}.auth-message.error{color:#ff8da5}.auth-account{display:flex;align-items:center;gap:10px;padding:11px;border:1px solid #1a4c88;background:#081a37;border-radius:9px;margin-bottom:13px}.auth-account strong{display:block}.auth-account small{color:#8da7cf}.auth-signout{width:100%;border:1px solid #9b4164;border-radius:8px;background:#3c1733;color:#ffc3d2;padding:10px}
+  `;
+  document.head.appendChild(authStyle);
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="auth-modal" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle">
+      <div class="auth-card">
+        <button class="auth-close" id="authClose" aria-label="Close">×</button>
+        <div class="eyebrow">Musica Space account</div><h2 id="authTitle">Sign in to Musica Space</h2><p id="authDescription">Simpan lagu, playlist, favorit, dan progres latihanmu.</p>
+        <div id="authGuest"><div class="auth-tabs"><button class="auth-tab active" data-auth-mode="signin">Sign in</button><button class="auth-tab" data-auth-mode="signup">Create account</button></div>
+          <form class="auth-form" id="authForm"><div id="nameField" style="display:none"><label>Nama<input id="authName" autocomplete="name" placeholder="Nama kamu"></label></div><label>Email<input id="authEmail" type="email" autocomplete="email" placeholder="kamu@email.com" required></label><label>Password<input id="authPassword" type="password" autocomplete="current-password" placeholder="Minimal 6 karakter" minlength="6" required></label><button class="auth-submit" type="submit" id="authSubmit">Sign in</button></form>
+          <div class="auth-divider">atau</div><button class="auth-google" id="googleAuth" type="button">Continue with Google</button><div class="auth-message" id="authMessage"></div>
+        </div>
+        <div id="authSigned" style="display:none"><div class="auth-account"><span class="avatar">F</span><div><strong id="authUserName">Signed in</strong><small id="authUserEmail"></small></div></div><button class="auth-signout" id="signOut" type="button">Sign out</button></div>
+      </div>
+    </div>`);
+
+  const modal = document.getElementById('authModal');
+  const openModal = () => modal.classList.add('open');
+  const closeModal = () => modal.classList.remove('open');
+  document.getElementById('authClose').onclick = closeModal;
+  modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
+  document.querySelectorAll('.profile,.top-user').forEach(button => button.addEventListener('click', openModal));
+  const message = (text, error = false) => { const el=document.getElementById('authMessage'); el.textContent=text; el.classList.toggle('error',error); };
+  let mode = 'signin';
+  document.querySelectorAll('[data-auth-mode]').forEach(tab => tab.addEventListener('click', () => {
+    mode = tab.dataset.authMode;
+    document.querySelectorAll('[data-auth-mode]').forEach(item => item.classList.toggle('active', item.dataset.authMode === mode));
+    document.getElementById('nameField').style.display = mode === 'signup' ? 'block' : 'none';
+    document.getElementById('authSubmit').textContent = mode === 'signup' ? 'Create account' : 'Sign in';
+    document.getElementById('authTitle').textContent = mode === 'signup' ? 'Create your account' : 'Sign in to Musica Space';
+    message('');
+  }));
+
+  const setAccountUI = user => {
+    const signed = Boolean(user);
+    document.getElementById('authGuest').style.display = signed ? 'none' : 'block';
+    document.getElementById('authSigned').style.display = signed ? 'block' : 'none';
+    if (signed) {
+      const name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Musica Space user';
+      document.getElementById('authUserName').textContent = name;
+      document.getElementById('authUserEmail').textContent = user.email || '';
+      document.querySelectorAll('.profile strong').forEach(el => el.textContent = name);
+      document.querySelectorAll('.profile small').forEach(el => el.textContent = 'Signed in');
+      document.querySelectorAll('.top-user span:not(.avatar):not(.chev)').forEach(el => el.textContent = name.split(' ')[0]);
+    } else {
+      document.querySelectorAll('.profile strong').forEach(el => el.textContent = 'Faza Sadikin');
+      document.querySelectorAll('.profile small').forEach(el => el.textContent = 'Free Plan');
+      document.querySelectorAll('.top-user span:not(.avatar):not(.chev)').forEach(el => el.textContent = 'Sign in');
+    }
+  };
+
+  try {
+    const { createClient } = await import('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm');
+    const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY);
+    const sessionResult = await supabase.auth.getSession();
+    setAccountUI(sessionResult.data.session?.user || null);
+    supabase.auth.onAuthStateChange((_event, session) => setAccountUI(session?.user || null));
+    document.getElementById('authForm').addEventListener('submit', async event => {
+      event.preventDefault(); message('Processing…');
+      const email=document.getElementById('authEmail').value.trim(); const password=document.getElementById('authPassword').value; const name=document.getElementById('authName').value.trim();
+      const result = mode === 'signup' ? await supabase.auth.signUp({email,password,options:{data:{full_name:name},emailRedirectTo:window.location.origin}}) : await supabase.auth.signInWithPassword({email,password});
+      if (result.error) { message(result.error.message, true); return; }
+      if (mode === 'signup' && !result.data.session) message('Akun dibuat. Cek email untuk konfirmasi.'); else { message('Berhasil masuk.'); setTimeout(closeModal,500); }
+    });
+    document.getElementById('googleAuth').addEventListener('click', async () => {
+      const result=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin}});
+      if(result.error) message('Google login belum aktif di Supabase. Aktifkan Google di Authentication → Providers.', true);
+    });
+    document.getElementById('signOut').addEventListener('click', async () => { await supabase.auth.signOut(); closeModal(); message(''); });
+  } catch (error) {
+    document.getElementById('authSubmit').disabled=true;
+    message('Auth library gagal dimuat. Coba refresh halaman.', true);
+  }
+})();

@@ -192,6 +192,15 @@
   modal.addEventListener('click', event => { if (event.target === modal) closeModal(); });
   document.querySelectorAll('.profile,.top-user').forEach(button => button.addEventListener('click', openModal));
   const message = (text, error = false) => { const el=document.getElementById('authMessage'); el.textContent=text; el.classList.toggle('error',error); };
+  const showOAuthErrorFromUrl = () => {
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get('error_description') || params.get('error');
+    if (!raw) return;
+    const detail = raw.replace(/\+/g, ' ');
+    openModal();
+    message(`Google login gagal: ${detail}`, true);
+    window.history.replaceState({}, document.title, window.location.pathname);
+  };
   let mode = 'signin';
   document.querySelectorAll('[data-auth-mode]').forEach(tab => tab.addEventListener('click', () => {
     mode = tab.dataset.authMode;
@@ -234,10 +243,16 @@
       if (mode === 'signup' && !result.data.session) message('Akun dibuat. Cek email untuk konfirmasi.'); else { message('Berhasil masuk.'); setTimeout(closeModal,500); }
     });
     document.getElementById('googleAuth').addEventListener('click', async () => {
-      const result=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:window.location.origin}});
-      if(result.error) message('Google login belum aktif di Supabase. Aktifkan Google di Authentication → Providers.', true);
+      message('Menghubungkan ke Google…');
+      try {
+        const result=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:`${window.location.origin}/`}});
+        if(result.error) message(`Google login gagal: ${result.error.message}`, true);
+      } catch (error) {
+        message(`Google login gagal: ${error.message || 'konfigurasi OAuth belum lengkap.'}`, true);
+      }
     });
     document.getElementById('signOut').addEventListener('click', async () => { await supabase.auth.signOut(); closeModal(); message(''); });
+    showOAuthErrorFromUrl();
   } catch (error) {
     document.getElementById('authSubmit').disabled=true;
     message('Auth library gagal dimuat. Coba refresh halaman.', true);

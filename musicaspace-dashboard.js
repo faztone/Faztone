@@ -238,14 +238,16 @@
     document.getElementById('authForm').addEventListener('submit', async event => {
       event.preventDefault(); message('Processing…');
       const email=document.getElementById('authEmail').value.trim(); const password=document.getElementById('authPassword').value; const name=document.getElementById('authName').value.trim();
-      const result = mode === 'signup' ? await supabase.auth.signUp({email,password,options:{data:{full_name:name},emailRedirectTo:window.location.origin}}) : await supabase.auth.signInWithPassword({email,password});
+      const appRedirectUrl = `${window.location.origin}${window.location.pathname}`;
+      const result = mode === 'signup' ? await supabase.auth.signUp({email,password,options:{data:{full_name:name},emailRedirectTo:appRedirectUrl}}) : await supabase.auth.signInWithPassword({email,password});
       if (result.error) { message(result.error.message, true); return; }
       if (mode === 'signup' && !result.data.session) message('Akun dibuat. Cek email untuk konfirmasi.'); else { message('Berhasil masuk.'); setTimeout(closeModal,500); }
     });
     document.getElementById('googleAuth').addEventListener('click', async () => {
       message('Menghubungkan ke Google…');
       try {
-        const result=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:`${window.location.origin}/`}});
+        const appRedirectUrl = `${window.location.origin}${window.location.pathname}`;
+        const result=await supabase.auth.signInWithOAuth({provider:'google',options:{redirectTo:appRedirectUrl}});
         if(result.error) message(`Google login gagal: ${result.error.message}`, true);
       } catch (error) {
         message(`Google login gagal: ${error.message || 'konfigurasi OAuth belum lengkap.'}`, true);

@@ -27,8 +27,9 @@
 
   const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
   const keyboardHotkeys = ['a','w','s','e','d','f','t','g','y','h','u','j','k','o','l','p',';'];
-  const pianoMin = 48;
+  const pianoMin = 36;
   const pianoMax = 84;
+  const pianoHotkeyStart = 60;
   const songs = {
     furElise: [76,75,76,75,76,71,74,72,69,45,52,57,60,64,69,71,76,75,76,75,76,71,74,72,69,45,52,57,64,69,72,74],
     cMajor: [60,62,64,65,67,69,71,72,71,69,67,65,64,62,60]
@@ -631,27 +632,19 @@
     for (let midi = pianoMin; midi <= pianoMax; midi += 1) {
       if (!isBlack(midi)) {
         const key = document.createElement('button');
-        key.type = 'button';
-        key.className = 'white-key';
-        key.dataset.midi = String(midi);
-        key.textContent = noteLabel(midi);
-        white.push(key);
-        keyboard.appendChild(key);
+        key.type = 'button'; key.className = 'white-key'; key.dataset.midi = String(midi);
+        key.textContent = noteLabel(midi); white.push(key); keyboard.appendChild(key);
       }
     }
+    const whiteCount = white.length;
     let whiteIndex = 0;
     for (let midi = pianoMin; midi <= pianoMax; midi += 1) {
       if (isBlack(midi)) {
         const key = document.createElement('button');
-        key.type = 'button';
-        key.className = 'black-key';
-        key.dataset.midi = String(midi);
-        key.textContent = noteLabel(midi);
-        key.style.left = (6 + whiteIndex * (88 / white.length)) + '%';
+        key.type = 'button'; key.className = 'black-key'; key.dataset.midi = String(midi);
+        key.textContent = noteLabel(midi); key.style.left = ((whiteIndex - 0.34) / whiteCount * 100) + '%';
         keyboard.appendChild(key);
-      } else {
-        whiteIndex += 1;
-      }
+      } else whiteIndex += 1;
     }
   }
 
@@ -661,59 +654,81 @@
       return true;
     }
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtor) {
-      const status = $('#audioStatus');
-      if (status) status.textContent = 'Browser audio unavailable';
-      return false;
-    }
+    if (!AudioCtor) { const status = $('#audioStatus'); if (status) status.textContent = 'Browser audio unavailable'; return false; }
     state.audio = new AudioCtor();
     state.master = state.audio.createGain();
     state.master.gain.value = 0.72;
     state.master.connect(state.audio.destination);
     const status = $('#audioStatus');
-    if (status) status.textContent = 'HQ piano engine ready';
+    if (status) { status.textContent = 'Loading sampled piano…'; status.classList.add('sample-loading'); }
+    warmPianoSamples();
     return true;
   }
 
-  function frequency(midi) {
-    return 440 * Math.pow(2, (midi - 69) / 12);
-  }
+  const pianoSampleBank = [
+    { midi:36, name:'C2' }, { midi:43, name:'G2' }, { midi:48, name:'C3' },
+    { midi:55, name:'G3' }, { midi:60, name:'C4' }, { midi:67, name:'G4' },
+    { midi:72, name:'C5' }, { midi:79, name:'G5' }, { midi:84, name:'C6' }
+  ];
+  const pianoSampleCache = new Map();
+  const pianoSampleLoading = new Map();
 
+  function sampleUrl(name) { return 'https://tonejs.github.io/audio/salamander/' + name + '.mp3'; }
+  function nearestPianoSample(midi) {
+    return pianoSampleBank.reduce((best, sample) => Math.abs(sample.midi - midi) < Math.abs(best.midi - midi) ? sample : best, pianoSampleBank[0]);
+  }
+  async function loadPianoSample(sample) {
+    if (pianoSampleCache.has(sample.name)) return pianoSampleCache.get(sample.name);
+    if (pianoSampleLoading.has(sample.name)) return pianoSampleLoading.get(sample.name);
+    const loading = fetch(sampleUrl(sample.name)).then(response => {
+      if (!response.ok) throw new Error('sample fetch failed');
+      return response.arrayBuffer();
+    }).then(data => state.audio.decodeAudioData(data)).then(buffer => {
+      pianoSampleCache.set(sample.name, buffer); return buffer;
+    }).finally(() => pianoSampleLoading.delete(sample.name));
+    pianoSampleLoading.set(sample.name, loading);
+    return loading;
+  }
+  async function warmPianoSamples() {
+    try {
+      await Promise.all([loadPianoSample(pianoSampleBank[4]), loadPianoSample(pianoSampleBank[5])]);
+      const status = $('#audioStatus');
+      if (status) { status.textContent = 'HQ sampled piano ready'; status.classList.remove('sample-loading'); status.classList.add('sample-ready'); }
+    } catch (error) {
+      const status = $('#audioStatus'); if (status) status.textContent = 'Sample unavailable · fallback piano ready';
+    }
+  }
+  function frequency(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
   function releaseVoice(midi) {
     const voice = state.activeVoices.get(midi);
     if (!voice || !state.audio) return;
     const now = state.audio.currentTime;
-    try {
-      voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setTargetAtTime(0.0001, now, 0.18);
-      voice.osc.stop(now + 0.75);
-    } catch (error) {}
+    try { voice.gain.gain.cancelScheduledValues(now); voice.gain.gain.setTargetAtTime(0.0001, now, 0.18); voice.source.stop(now + 0.75); } catch (error) {}
     state.activeVoices.delete(midi);
   }
-
-  function playTone(midi, duration) {
-    if (!ensureAudio()) return;
+  function startFallbackVoice(midi, duration) {
     const now = state.audio.currentTime;
-    const osc = state.audio.createOscillator();
-    const gain = state.audio.createGain();
-    const filter = state.audio.createBiquadFilter();
-    const naturalRelease = duration || 1.6;
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(frequency(midi), now);
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(4200, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.17, now + 0.28);
-    gain.gain.setTargetAtTime(0.0001, now + naturalRelease, 0.24);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(state.master);
-    const voice = { osc: osc, gain: gain };
-    state.activeVoices.set(midi, voice);
-    osc.onended = () => { if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi); };
-    osc.start(now);
-    osc.stop(now + naturalRelease + 1.15);
+    const source = state.audio.createOscillator(); const gain = state.audio.createGain(); const filter = state.audio.createBiquadFilter();
+    source.type = 'triangle'; source.frequency.setValueAtTime(frequency(midi), now); filter.type = 'lowpass'; filter.frequency.setValueAtTime(5200, now);
+    gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.32, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.12, now + 0.3); gain.gain.setTargetAtTime(0.0001, now + duration, 0.24);
+    source.connect(filter); filter.connect(gain); gain.connect(state.master);
+    const voice = { source:source, gain:gain }; state.activeVoices.set(midi, voice);
+    source.onended = () => { if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi); };
+    source.start(now); source.stop(now + duration + 1.2);
+  }
+  async function playTone(midi, duration) {
+    if (!ensureAudio()) return;
+    const numeric = Number(midi); const naturalRelease = duration || 1.8; const sample = nearestPianoSample(numeric);
+    try {
+      const buffer = await loadPianoSample(sample);
+      const now = state.audio.currentTime; const source = state.audio.createBufferSource(); const gain = state.audio.createGain(); const filter = state.audio.createBiquadFilter();
+      source.buffer = buffer; source.playbackRate.value = Math.pow(2, (numeric - sample.midi) / 12); filter.type = 'lowpass'; filter.frequency.setValueAtTime(7600, now);
+      gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.62, now + 0.012); gain.gain.exponentialRampToValueAtTime(0.24, now + 0.36); gain.gain.setTargetAtTime(0.0001, now + naturalRelease, 0.3);
+      source.connect(filter); filter.connect(gain); gain.connect(state.master);
+      const voice = { source:source, gain:gain }; state.activeVoices.set(numeric, voice);
+      source.onended = () => { if (state.activeVoices.get(numeric) === voice) state.activeVoices.delete(numeric); };
+      source.start(now); source.stop(now + naturalRelease + 2);
+    } catch (error) { startFallbackVoice(numeric, naturalRelease); }
   }
 
   function setKeyVisual(midi, active) {
@@ -814,15 +829,22 @@
     if (feedback) feedback.textContent = 'Ready to play';
   }
 
-  function addFallingNote(midi, index) {
-    const lane = $('#visualizerNotes');
-    if (!lane) return;
-    const note = document.createElement('div');
-    note.className = 'fall-note';
-    note.dataset.midi = String(midi);
-    note.style.left = (4 + (index % 18) * 5.1) + '%';
-    lane.appendChild(note);
-    window.setTimeout(() => note.remove(), 3800);
+  function pianoPositionForMidi(midi) {
+    const totalWhite = [];
+    let whiteBefore = 0;
+    for (let note = pianoMin; note <= pianoMax; note += 1) {
+      if (!isBlack(note)) totalWhite.push(note);
+      if (note < midi && !isBlack(note)) whiteBefore += 1;
+    }
+    const width = 100 / Math.max(1, totalWhite.length);
+    return isBlack(midi) ? { left:(whiteBefore - 0.34) * width, width:width * 0.68 } : { left:whiteBefore * width, width:width };
+  }
+  function addFallingNote(midi, index, speed) {
+    const lane = $('#visualizerNotes'); if (!lane) return;
+    const note = document.createElement('div'); const position = pianoPositionForMidi(Number(midi));
+    note.className = 'fall-note'; note.dataset.midi = String(midi); note.dataset.index = String(index);
+    note.style.left = position.left + '%'; note.style.width = position.width + '%'; note.style.animationDuration = (Math.max(1.8, 3.2 / (speed || 1))) + 's'; note.title = noteLabel(Number(midi));
+    lane.appendChild(note); window.setTimeout(() => note.remove(), Math.max(2200, 3600 / (speed || 1)));
   }
 
   function startSong(name) {
@@ -836,7 +858,7 @@
       if (state.songIndex >= sequence.length) { stopSong(); showToast('Demo selesai.'); return; }
       const midi = sequence[state.songIndex];
       state.expected = midi;
-      addFallingNote(midi, state.songIndex);
+      addFallingNote(midi, state.songIndex, speed);
       const feedback = $('#pianoFeedback');
       if (feedback) feedback.textContent = 'Play ' + noteLabel(midi);
       state.songIndex += 1;
@@ -875,6 +897,8 @@
     if (stop) stop.addEventListener('click', stopSong);
     const demo = $('#practiceDemo');
     if (demo) demo.addEventListener('click', () => startSong('furElise'));
+    const volume = $('#pianoVolume');
+    if (volume) volume.addEventListener('input', () => { if (state.master) state.master.gain.value = Number(volume.value); });
     state.pianoReady = true;
   }
 
@@ -951,7 +975,7 @@
       if (event.key === 'Escape') stopSong();
       if (state.view !== 'pianoVisualizer' || ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) >= 0) return;
       const index = keyboardHotkeys.indexOf(event.key.toLowerCase());
-      if (index >= 0) triggerKey(pianoMin + index, true);
+      if (index >= 0) triggerKey(pianoHotkeyStart + index, true);
     });
     document.addEventListener('keyup', event => { if (event.code === 'Space') toggleSustain(false); });
 

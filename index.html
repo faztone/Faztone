@@ -78,6 +78,102 @@
       .piano-side { display: grid; grid-template-columns: minmax(0, 1fr); }
     }
 
+      .chord-detail-head {
+      align-items: flex-start;
+      gap: 18px;
+    }
+    .chord-detail-head .back-link {
+      margin-bottom: 12px;
+    }
+    .chord-detail-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+    .chord-detail-actions select {
+      min-width: 138px;
+    }
+    .chord-control-panel {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    .chord-meta {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+      color: #a9c3f5;
+    }
+    .chord-meta strong {
+      color: #42e6c4;
+      font-size: 1.15rem;
+    }
+    .chord-sections {
+      display: grid;
+      gap: 14px;
+    }
+    .chord-section {
+      border: 1px solid #1c528d;
+      border-radius: 14px;
+      background: #071a38;
+      padding: 16px;
+    }
+    .chord-section h3 {
+      margin: 0 0 12px;
+      color: #eef5ff;
+      text-transform: capitalize;
+    }
+    .chord-line {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .chord-chip {
+      display: inline-flex;
+      min-width: 54px;
+      justify-content: center;
+      padding: 9px 12px;
+      border: 1px solid #2c83df;
+      border-radius: 9px;
+      color: #59ead0;
+      background: #0c2b57;
+      font-weight: 800;
+    }
+    .chord-placeholder {
+      margin: 13px 0 0;
+      padding-top: 12px;
+      border-top: 1px dashed #214e80;
+      color: #7f9ac6;
+      font-size: .88rem;
+    }
+    .transpose-status {
+      color: #91b5ef;
+      font-size: .9rem;
+    }
+    @media (max-width: 680px) {
+      .chord-detail-head,
+      .chord-control-panel {
+        align-items: stretch;
+      }
+      .chord-detail-actions {
+        justify-content: flex-start;
+      }
+      .chord-detail-actions select {
+        flex: 1 1 140px;
+      }
+      .chord-meta {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+    }
+
   </style>
 </head>
 <body>
@@ -153,8 +249,39 @@
 <section class="view" id="playlistsView" data-title="Playlists"><div class="subhead"><div><h1>Playlists</h1><p>Susun lagu latihanmu sendiri.</p></div><button type="button" class="primary" data-action="newPlaylist">＋ New playlist</button></div><div class="big-panel"><div class="not-found">Belum ada playlist. Buat playlist pertama untuk mulai latihan.</div></div></section>
 <section class="view" id="practiceView" data-title="Practice"><div class="subhead"><div><h1>Practice hub</h1><p>Mulai dari piano visualizer atau metronome.</p></div></div><div class="tools-grid"><button type="button" class="tool-card" data-view="pianoVisualizer"><span class="tool-icon">▥</span><strong>Piano lesson</strong><p>Latihan Für Elise dengan falling notes.</p></button><button type="button" class="tool-card" data-view="metronome"><span class="tool-icon">♩</span><strong>Keep time</strong><p>Gunakan metronome untuk menjaga tempo.</p></button></div></section>
 <section class="view" id="communityView" data-title="Community"><div class="subhead"><div><h1>Community</h1><p>Bagikan progression dan tips latihan.</p></div></div><div class="big-panel"><div class="not-found">Community feed segera hadir. Tool utama tetap bisa dipakai sekarang.</div></div></section>
+<section class="view" id="chordDetailView" data-title="Chord Sheet">
+  <div class="subhead chord-detail-head">
+    <div>
+      <button type="button" class="secondary back-link" data-view="library">← Back to Chord Library</button>
+      <p class="eyebrow">CHORD SHEET</p>
+      <h1 id="chordDetailTitle">Pilih lagu</h1>
+      <p id="chordDetailArtist">Chord progression reference</p>
+    </div>
+    <div class="chord-detail-actions">
+      <label class="sr-only" for="chordTransposeKey">Transpose key</label>
+      <select id="chordTransposeKey" aria-label="Transpose key"></select>
+      <button type="button" class="secondary" id="chordTransposeDown">−</button>
+      <button type="button" class="primary" id="chordTransposeUp">＋</button>
+    </div>
+  </div>
+  <div class="big-panel chord-control-panel">
+    <div class="chord-meta">
+      <span id="chordDetailKey">Original key: —</span>
+      <strong id="chordDetailCurrentKey">—</strong>
+      <span id="chordDetailDifficulty"></span>
+      <span class="transpose-status" id="chordTransposeStatus">Roman numeral transpose ready</span>
+    </div>
+    <button type="button" class="secondary" data-action="catalogPiano">Practice on Piano</button>
+  </div>
+  <div class="big-panel">
+    <h2>Lyrics & Chords</h2>
+    <p class="transpose-status">Chord sheet ini memakai section lagu dan progression ringkas dari katalog. Lirik hanya bisa ditampilkan jika sumbernya berlisensi atau kamu menambahkannya sendiri.</p>
+    <div id="chordSections" class="chord-sections"></div>
+  </div>
+</section>
+
 </div></main></div><audio id="songAudio" preload="none"></audio><div class="modal hidden" id="authModal" role="dialog" aria-modal="true" aria-labelledby="authTitle"><div class="modal-card"><h2 id="authTitle">Masuk ke MusicaSpace</h2><p>Simpan favorite dan progres latihan di akunmu.</p><div class="modal-actions"><button type="button" class="primary" id="googleLogin">Continue with Google</button><button type="button" class="secondary" id="closeAuth">Tutup</button><button type="button" class="secondary" id="logoutButton">Logout</button></div><div class="auth-message" id="authMessage"></div></div></div><div class="toast" id="toast" role="status"></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-<script src="musicaspace-dashboard.js?v=20261003-catalog1"></script>
+<script src="musicaspace-dashboard.js?v=20261003-chords1"></script>
 </body>
 </html>

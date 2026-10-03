@@ -477,7 +477,7 @@
   chordModeButton?.addEventListener('click',()=>setChordMode(!chordMode));
   $('#playSelectedChord')?.addEventListener('click',playSelectedChord);
   $('#clearSelectedChord')?.addEventListener('click',()=>{selectedChord.clear();updateChordSelection();practiceMessage('Chord cleared');});
-  $('.chord-preset').forEach(button=>button.addEventListener('click',()=>{
+  Array.from(document.querySelectorAll('.chord-preset')).forEach(button=>button.addEventListener('click',()=>{
     selectedChord.clear();
     button.dataset.chord.split(',').map(Number).forEach(note=>selectedChord.add(note));
     setChordMode(true);

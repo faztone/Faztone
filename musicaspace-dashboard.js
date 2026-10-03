@@ -21,6 +21,9 @@
     {title:'Man I Need',artist:'Olivia Dean',key:'G',bpm:100,cover:'green',chartRank:9,search:'Man I Need Olivia Dean'},
     {title:'Be Her',artist:'Ella Langley',key:'D',bpm:76,cover:'adele',chartRank:10,search:'Be Her Ella Langley'}
   ];
+  songs = songs.map(song => ({genre:'Pop', ...song}));
+  const favoriteTitles = new Set(JSON.parse(localStorage.getItem('musicaspace-favorites') || '[]'));
+  const saveFavorites = () => localStorage.setItem('musicaspace-favorites', JSON.stringify([...favoriteTitles]));
   const progressions = [
     {title:'Chill Pop Progression',chords:'C · Am · F · G',tag:'Pop',className:''},
     {title:'Emotional Ballad',chords:'Em · C · G · D',tag:'Ballad',className:''},
@@ -36,22 +39,29 @@
   };
   $$('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
 
-  const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart" aria-label="Favorite ${song.title}">♥</button><button class="more" aria-label="More options">•••</button></div>`;
+  const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${favoriteTitles.has(song.title) ? '♥' : '♡'}</button><button class="more" aria-label="More options">•••</button></div>`;
   const renderRecentSongs = () => { $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join(''); };
   renderRecentSongs();
   const progressionMarkup = item => `<div class="progress-row"><button class="play-small" data-progression="${item.title}">▶</button><div class="progress-meta"><strong>${item.title}</strong><small>${item.chords}</small></div><span class="tag ${item.className}">${item.tag}</span><button class="more">•••</button></div>`;
-  $('#savedProgressions').innerHTML = progressions.map(progressionMarkup).join('');
+  const renderSavedProgressions = () => { $('#savedProgressions').innerHTML = progressions.map(progressionMarkup).join(''); };
+  renderSavedProgressions();
 
-  const libraryMarkup = song => `<div class="mini-card"><div class="cover ${song.cover}">${song.title === 'Midnight Drive' ? '♫' : '♪'}</div><div style="min-width:0;flex:1"><h3>${song.title}</h3><p>${song.artist} · Key ${song.key} · ${song.bpm} BPM</p></div><button class="heart off" aria-label="Favorite">♡</button></div>`;
+  const libraryMarkup = (song,index) => `<div class="mini-card"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div style="min-width:0;flex:1"><h3>${song.title}</h3><p>${song.artist} · Key ${song.key} · ${song.bpm} BPM</p></div><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${favoriteTitles.has(song.title) ? '♥' : '♡'}</button></div>`;
   const renderLibrary = () => {
     const query = ($('#librarySearch')?.value || '').toLowerCase();
     const genre = $('#genreFilter')?.value || 'all';
-    const filtered = songs.filter(song => `${song.title} ${song.artist}`.toLowerCase().includes(query) && (genre === 'all' || (genre === 'Jazz' && song.title.includes('Slowly')) || genre !== 'Jazz'));
-    $('#libraryGrid').innerHTML = filtered.length ? filtered.map(libraryMarkup).join('') : '<div class="not-found" style="grid-column:1/-1">No songs found. Try another search.</div>';
+    const filtered = songs.map((song,index) => ({song,index})).filter(({song}) => `${song.title} ${song.artist}`.toLowerCase().includes(query) && (genre === 'all' || song.genre === genre));
+    $('#libraryGrid').innerHTML = filtered.length ? filtered.map(({song,index}) => libraryMarkup(song,index)).join('') : '<div class="not-found" style="grid-column:1/-1">No songs found. Try another search.</div>';
   };
   renderLibrary();
   $('#librarySearch').addEventListener('input', renderLibrary);
   $('#genreFilter').addEventListener('change', renderLibrary);
+  const renderMyLibrary = () => {
+    const favorites = songs.map((song,index) => ({song,index})).filter(({song}) => favoriteTitles.has(song.title));
+    $('#favoritesList').innerHTML = favorites.length ? favorites.map(({song,index}) => `<button class="feature-button" data-song-play="${index}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">▶</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>♥</span></button>`).join('') : '<div class="not-found">Belum ada favorit. Tekan ♥ pada lagu untuk menyimpannya.</div>';
+    $('#favoriteCount').textContent = favorites.length;
+  };
+  renderMyLibrary();
 
   const renderProgressionPage = () => {
     $('#progressionPageList').innerHTML = progressions.map(item => `<div class="feature-button progression-open" data-title="${item.title}"><button class="play-small" data-progression="${item.title}">▶</button><span><strong>${item.title}</strong><small>${item.chords}</small></span><span class="tag ${item.className}">${item.tag}</span></div>`).join('');
@@ -60,10 +70,18 @@
   document.addEventListener('click', event => {
     const songIndex = event.target.closest('[data-song-play]')?.dataset.songPlay;
     if (songIndex !== undefined) playSong(Number(songIndex));
+    const playlistButton = event.target.closest('.playlist-open');
+    if (playlistButton) { const title=playlistButton.closest('.big-panel')?.querySelector('h2')?.textContent || 'Playlist'; showView('library'); $('#librarySearch').value=''; renderLibrary(); toast(`Opening playlist · ${title}`); }
     const progression = event.target.closest('[data-progression]')?.dataset.progression;
     if (progression) {
       const item = progressions.find(entry => entry.title === progression);
-      if (item) { $('#progressionPattern').textContent = item.chords.replaceAll(' · ',' – '); toast(`Playing ${item.title}`); }
+      if (item) { $('#progressionPattern').textContent = item.chords.replaceAll(' · ',' – '); $('#progressionTempo').textContent = item.tempo || 92; playProgression(item); }
+    }
+    const favoriteIndex = event.target.closest('[data-favorite]')?.dataset.favorite;
+    if (favoriteIndex !== undefined) {
+      const song = songs[Number(favoriteIndex)];
+      if (song) { favoriteTitles.has(song.title) ? favoriteTitles.delete(song.title) : favoriteTitles.add(song.title); saveFavorites(); renderRecentSongs(); renderLibrary(); renderMyLibrary(); toast(favoriteTitles.has(song.title) ? `Saved · ${song.title}` : `Removed · ${song.title}`); }
+      return;
     }
     const favorite = event.target.closest('.heart');
     if (favorite) { favorite.classList.toggle('off'); favorite.textContent = favorite.classList.contains('off') ? '♡' : '♥'; toast(favorite.classList.contains('off') ? 'Removed from favorites' : 'Added to favorites'); }
@@ -137,16 +155,28 @@
   $('#upgradeBtn').addEventListener('click', () => toast('Pro upgrade flow coming soon'));
   $('#notificationBtn').addEventListener('click', () => toast('No new notifications'));
   $('#themeBtn').addEventListener('click', () => toast('Dark neon theme is active'));
-  $('#addSongBtn').addEventListener('click', () => toast('Song editor opened'));
-  $('#newProgressionBtn').addEventListener('click', () => toast('New progression created'));
-  $('#newPlaylistBtn').addEventListener('click', () => toast('New playlist created'));
-  $('#startPractice').addEventListener('click', () => { $('#sessionState').textContent = 'Active'; toast('Practice session started · 45 min'); });
+  $('#addSongBtn').addEventListener('click', () => { showView('finder'); $('#finderInput').focus(); toast('Song Finder siap dipakai untuk menambahkan lagu'); });
+  $('#newProgressionBtn').addEventListener('click', () => { const item={title:`My Progression ${progressions.length - 4}`,chords:'C · G · Am · F',tag:'Custom',className:'',tempo:92}; progressions.push(item); renderSavedProgressions(); renderProgressionPage(); toast('New progression created · C – G – Am – F'); });
+  $('#newPlaylistBtn').addEventListener('click', () => { const card=document.createElement('div'); card.className='big-panel'; card.innerHTML='<h2>My Practice Set</h2><p>0 songs · custom playlist</p><button class="secondary playlist-open">Open playlist</button>'; $('#playlistsGrid').appendChild(card); toast('New playlist created · My Practice Set'); });
+  let practiceTimer;
+  let practiceRemaining = 45 * 60;
+  let practiceRunning = false;
+  const updatePracticeTimer = () => { const minutes = Math.floor(practiceRemaining / 60); const seconds = practiceRemaining % 60; $('#practiceTimer').textContent = `${minutes}:${String(seconds).padStart(2,'0')} remaining`; };
+  updatePracticeTimer();
+  $('#startPractice').addEventListener('click', () => {
+    practiceRunning = !practiceRunning;
+    clearInterval(practiceTimer);
+    if (practiceRunning) {
+      $('#sessionState').textContent = 'Active'; $('#startPractice').textContent = 'Pause Session'; toast('Practice session started · 45 min');
+      practiceTimer = setInterval(() => { practiceRemaining = Math.max(0, practiceRemaining - 1); updatePracticeTimer(); if (!practiceRemaining) { practiceRunning=false; clearInterval(practiceTimer); $('#sessionState').textContent='Done'; $('#startPractice').textContent='Start Again'; toast('Practice session complete'); } }, 1000);
+    } else { $('#sessionState').textContent = 'Paused'; $('#startPractice').textContent = 'Resume Session'; toast('Practice session paused'); }
+  });
   $('#joinCircle').addEventListener('click', () => toast('Community circles opened'));
 
   const finder = query => {
     const q = (query || 'easy music').toLowerCase();
     const results = songs.filter(song => `${song.title} ${song.artist} ${song.key}`.toLowerCase().includes(q) || q.includes('easy') || q.includes('pop'));
-    $('#finderResults').innerHTML = results.slice(0,4).map(song => `<button class="feature-button"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">♫</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>›</span></button>`).join('') || '<div class="not-found">Belum menemukan lagu yang cocok.</div>';
+    $('#finderResults').innerHTML = results.slice(0,4).map(song => `<button class="feature-button" data-song-play="${songs.indexOf(song)}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">▶</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>Play ›</span></button>`).join('') || '<div class="not-found">Belum menemukan lagu yang cocok.</div>';
   };
   $('#finderBtn').addEventListener('click', () => finder($('#finderInput').value));
   $$('.finder-chip').forEach(chip => chip.addEventListener('click', () => { $('#finderInput').value=chip.textContent; finder(chip.textContent); }));
@@ -182,6 +212,17 @@
     oscillator.type='triangle'; oscillator.frequency.value=261.63*Math.pow(2,noteIndex/12); gain.gain.setValueAtTime(.0001,now); gain.gain.exponentialRampToValueAtTime(.12,now+.015); gain.gain.exponentialRampToValueAtTime(.0001,now+duration); oscillator.connect(gain).connect(audioContext.destination); oscillator.start(now); oscillator.stop(now+duration+.02);
   };
   $$('#miniPiano [data-note]').forEach(key => key.addEventListener('click', () => { const index=Number(key.dataset.index||0); key.classList.add('active'); setTimeout(()=>key.classList.remove('active'),180); playTone(index); toast(`Playing ${key.dataset.note}`); }));
+  let progressionTimer;
+  const playProgression = item => {
+    clearInterval(progressionTimer);
+    const roots = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
+    const notes = (item.chords.match(/[A-G]/g) || []).map(note => roots[note]).filter(note => note !== undefined);
+    let position = 0;
+    const tick = () => { if (notes.length) playTone(notes[position % notes.length], .55); position += 1; };
+    tick(); progressionTimer = setInterval(tick, 60000 / (item.tempo || 92));
+    toast(`Playing progression · ${item.title}`);
+    setTimeout(() => clearInterval(progressionTimer), Math.max(1, notes.length) * 60000 / (item.tempo || 92));
+  };
   $('#widgetKey').addEventListener('change', event => { const key=event.target.value; const map={C:'C · E · G',G:'G · B · D',D:'D · F♯ · A',F:'F · A · C'}; $('#chordDots').textContent=map[key]; });
 
   let progressionShift=0;

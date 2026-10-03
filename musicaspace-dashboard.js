@@ -265,6 +265,7 @@
   let pianoBus;
   let sustainEnabled = false;
   const activePianoVoices = new Set();
+  let sustainPedal=null;
   const pianoBuffers = {};
   const pianoLoads = {};
   const pianoSampleNotes = [
@@ -277,10 +278,13 @@
   const setSustain = enabled => {
     sustainEnabled = Boolean(enabled);
     const button = $('#sustainToggle');
+    sustainPedal ||= $('#sustainPedal');
     if (button) { button.classList.toggle('on',sustainEnabled); button.setAttribute('aria-pressed',String(sustainEnabled)); button.textContent=sustainEnabled?'♧ Sustain: On':'♧ Sustain: Off'; }
+    if (sustainPedal) { sustainPedal.classList.toggle('on',sustainEnabled); sustainPedal.setAttribute('aria-pressed',String(sustainEnabled)); sustainPedal.innerHTML=sustainEnabled?'<strong>♧ SUSTAIN: ON</strong><span>Tap or press Space to release</span>':'<strong>♧ SUSTAIN: OFF</strong><span>Press Space or tap to hold notes</span>'; }
     if (!sustainEnabled) activePianoVoices.forEach(voice => voice.release());
   };
   $('#sustainToggle')?.addEventListener('click',()=>setSustain(!sustainEnabled));
+  $('#sustainPedal')?.addEventListener('click',()=>setSustain(!sustainEnabled));
   const loadPianoSample = async sample => {
     if (pianoBuffers[sample.name]) return pianoBuffers[sample.name];
     if (!pianoLoads[sample.name]) {
@@ -301,7 +305,7 @@
     pianoBus.release.value=.24;
     pianoBus.connect(audioContext.destination);
   };
-  const playTone = async (noteIndex,duration=.9) => {
+  const playTone = async (noteIndex,duration=1.8) => {
     const Ctor=window.AudioContext||window.webkitAudioContext;
     if (!Ctor) { if ($('#pianoStatus')) $('#pianoStatus').textContent='Browser audio is not supported'; return; }
     audioContext ||= new Ctor();
@@ -325,10 +329,11 @@
         activePianoVoices.add(voice);
         source.onended=()=>activePianoVoices.delete(voice);
       } else {
-        gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+        const naturalRelease=Math.max(1.8,duration);
+        gain.gain.exponentialRampToValueAtTime(.0001,now+naturalRelease);
       }
       source.start(now);
-      if (!sustainEnabled) source.stop(now+Math.min(buffer.duration/source.playbackRate.value,duration+1.2));
+      if (!sustainEnabled) source.stop(now+Math.min(buffer.duration/source.playbackRate.value,naturalRelease+1.2));
       if ($('#pianoStatus')) $('#pianoStatus').textContent='HQ piano sample · '+sample.name+(sustainEnabled?' · sustain on':'');
     } catch (error) {
       if ($('#pianoStatus')) $('#pianoStatus').textContent='Piano sample gagal dimuat';
@@ -431,7 +436,7 @@
     const midi=Number(key.dataset.midi);
     setPianoKeyActive(midi);
     if(visualizerLastNote)visualizerLastNote.textContent='Playing · '+key.dataset.noteName;
-    playTone(midi-60,.95);
+    playTone(midi-60,1.8);
     if(!songPracticeRunning)return;
     const current=visualizerNotes?.querySelector('[data-practice-index="'+(songPracticePosition-1)+'"]');
     if(midi===songPracticeExpected&&!songPracticeResolved){songPracticeResolved=true;songHits++;songCombo++;songScore+=100+(songCombo-1)*10;if(current){current.classList.add('hit');setTimeout(()=>current.remove(),180);}practiceMessage('✓ Correct · '+key.dataset.noteName,'good');}

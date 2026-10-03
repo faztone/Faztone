@@ -90,7 +90,8 @@
     $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     window.scrollTo({top:0, behavior:'smooth'});
   };
-  $('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
+  // Safe view navigation binding
+  Array.from(document.querySelectorAll('[data-view]')).forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
   // Keep Tools navigation independent from optional audio initialization.
   // Tools navigation recovery handler
   Array.from(document.querySelectorAll('.tool-launch')).forEach(button=>button.addEventListener('click',()=>{

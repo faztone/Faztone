@@ -92,7 +92,8 @@
   };
   $('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
   // Keep Tools navigation independent from optional audio initialization.
-  $('.tool-launch').forEach(button=>button.addEventListener('click',()=>{
+  // Tools navigation recovery handler
+  Array.from(document.querySelectorAll('.tool-launch')).forEach(button=>button.addEventListener('click',()=>{
     if(button.dataset.tool==='Piano Visualizer'){
       showView('pianoVisualizer');
       $('#pianoVisualizerView')?.scrollIntoView({behavior:'smooth',block:'start'});

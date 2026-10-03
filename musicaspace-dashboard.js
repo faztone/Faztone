@@ -362,7 +362,101 @@
     tick(); metronomeTimer=setInterval(tick,60000/tempo); toast(`${tempo} BPM metronome started`);
   });
 
-  $$('.tool-launch').forEach(button => button.addEventListener('click', () => { $('#toolPanelTitle').textContent=button.dataset.tool; $('#toolPanelText').textContent=`${button.dataset.tool} siap dipakai. Ini adalah ruang latihan interaktif Musica Space.`; toast(`${button.dataset.tool} opened`); }));
+  const pianoVisualizerPanel = $('#pianoVisualizerPanel');
+  const toolPanel = $('#toolPanel');
+  const openPianoVisualizer = () => {
+    if (!pianoVisualizerPanel) return;
+    pianoVisualizerPanel.hidden = false;
+    if (toolPanel) toolPanel.hidden = true;
+    pianoVisualizerPanel.scrollIntoView({behavior:'smooth', block:'start'});
+    renderVisualizerScale();
+  };
+  $$('.tool-launch').forEach(button => button.addEventListener('click', () => {
+    if (button.dataset.tool === 'Piano Visualizer') { openPianoVisualizer(); toast('Piano Visualizer opened'); return; }
+    if (pianoVisualizerPanel) pianoVisualizerPanel.hidden = true;
+    if (toolPanel) toolPanel.hidden = false;
+    $('#toolPanelTitle').textContent=button.dataset.tool;
+    $('#toolPanelText').textContent=button.dataset.tool+' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';
+    toast(button.dataset.tool+' opened');
+  }));
+
+  const visualizerKeyboard = $('#visualizerKeyboard');
+  const visualizerNotes = $('#visualizerNotes');
+  const visualizerLastNote = $('#visualizerLastNote');
+  const visualizerScale = $('#visualizerScale');
+  const visualizerScaleNotes = $('#visualizerScaleNotes');
+  const visualizerNatural = ['C','D','E','F','G','A','B','C'];
+  const visualizerNaturalOffsets = [0,2,4,5,7,9,11,12];
+  const visualizerBlack = [
+    {name:'C♯', offset:1, left:'10.6%'},
+    {name:'D♯', offset:3, left:'23.1%'},
+    {name:'F♯', offset:6, left:'48.1%'},
+    {name:'G♯', offset:8, left:'60.6%'},
+    {name:'A♯', offset:10, left:'73.1%'}
+  ];
+  const scaleMap = {
+    'C-major': {label:'C · D · E · F · G · A · B', offsets:[0,2,4,5,7,9,11,12]},
+    'G-major': {label:'G · A · B · C · D · E · F♯', offsets:[7,9,11,12,14,16,18]},
+    'A-minor': {label:'A · B · C · D · E · F · G', offsets:[9,11,12,14,16,17,19]},
+    'D-minor': {label:'D · E · F · G · A · B♭ · C', offsets:[2,4,5,7,9,10,12]}
+  };
+  const renderVisualizerKeyboard = () => {
+    if (!visualizerKeyboard) return;
+    visualizerKeyboard.innerHTML = visualizerNatural.map((name,index) => '<button class="visual-white" data-visual-note="'+visualizerNaturalOffsets[index]+'" data-note-name="'+name+'4" type="button"><span>'+name+'</span></button>').join('') + visualizerBlack.map(item => '<button class="visual-black" style="left:'+item.left+'" data-visual-note="'+item.offset+'" data-note-name="'+item.name+'4" type="button"><span>'+item.name+'</span></button>').join('');
+  };
+  const renderVisualizerScale = () => {
+    const selected = scaleMap[visualizerScale?.value] || scaleMap['C-major'];
+    if (visualizerScaleNotes) visualizerScaleNotes.textContent = selected.label;
+    $$('#visualizerKeyboard [data-visual-note]').forEach(key => key.classList.toggle('scale-note', selected.offsets.includes(Number(key.dataset.visualNote))));
+  };
+  const spawnVisualizerNote = (offset) => {
+    if (!visualizerNotes) return;
+    const note = document.createElement('span');
+    note.className = 'note-fall';
+    note.style.left = 'calc('+Math.min(95, Math.max(1, offset / 12 * 100))+'% - 9px)';
+    note.style.width = '18px';
+    visualizerNotes.appendChild(note);
+    setTimeout(() => note.remove(), 1900);
+  };
+  const triggerVisualizerNote = (key) => {
+    if (!key) return;
+    const offset = Number(key.dataset.visualNote);
+    key.classList.add('active');
+    setTimeout(() => key.classList.remove('active'), 220);
+    spawnVisualizerNote(offset);
+    if (visualizerLastNote) visualizerLastNote.textContent = 'Playing · '+key.dataset.noteName;
+    playTone(offset, .95);
+  };
+  renderVisualizerKeyboard();
+  renderVisualizerScale();
+  visualizerKeyboard?.addEventListener('pointerdown', event => {
+    const key = event.target.closest('[data-visual-note]');
+    if (key) { event.preventDefault(); triggerVisualizerNote(key); }
+  });
+  visualizerScale?.addEventListener('change', renderVisualizerScale);
+  const computerNoteMap = {a:0,w:1,s:2,e:3,d:4,f:5,t:6,g:7,y:8,h:9,u:10,j:11,k:12};
+  window.addEventListener('keydown', event => {
+    if (event.repeat || ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
+    const offset = computerNoteMap[event.key.toLowerCase()];
+    if (offset === undefined) return;
+    const key = visualizerKeyboard?.querySelector('[data-visual-note="'+offset+'"]');
+    triggerVisualizerNote(key);
+  });
+  let demoTimer;
+  $('#demoPiano')?.addEventListener('click', () => {
+    clearInterval(demoTimer);
+    const demo = [0,4,7,12,7,4,2,0];
+    let position = 0;
+    const playNext = () => {
+      const key = visualizerKeyboard?.querySelector('[data-visual-note="'+demo[position % demo.length]+'"]');
+      triggerVisualizerNote(key);
+      position += 1;
+      if (position >= demo.length) { clearInterval(demoTimer); demoTimer = null; }
+    };
+    playNext();
+    demoTimer = setInterval(playNext, 520);
+    toast('Piano demo started');
+  });
 
   const tonalInput = $('#tonalAudio');
   tonalInput.addEventListener('change', () => { const file=tonalInput.files[0]; if(file){ $('#tonalPlayer').src=URL.createObjectURL(file); $('#tonalStatus').textContent=file.name; } });

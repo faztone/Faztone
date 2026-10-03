@@ -609,7 +609,9 @@
   function showView(view) {
     const target = $('#' + view + 'View');
     if (!target) return;
-    $$('.view').forEach(section => section.classList.toggle('active', section === target));
+    const app = document.querySelector('.app');
+    if (app) app.classList.remove('menu-open');
+    $('.view').forEach(section => section.classList.toggle('active', section === target));
     $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     state.view = view;
     if (view === 'pianoVisualizer') initPiano();
@@ -654,68 +656,140 @@
       return true;
     }
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtor) { const status = $('#audioStatus'); if (status) status.textContent = 'Browser audio unavailable'; return false; }
+    if (!AudioCtor) {
+      const status = $('#audioStatus');
+      if (status) status.textContent = 'Browser audio unavailable';
+      return false;
+    }
     state.audio = new AudioCtor();
     state.master = state.audio.createGain();
     state.master.gain.value = 0.72;
     state.master.connect(state.audio.destination);
     const status = $('#audioStatus');
-    if (status) { status.textContent = 'Loading sampled piano…'; status.classList.add('sample-loading'); }
+    if (status) {
+      status.textContent = 'Loading HQ piano samples…';
+      status.classList.remove('sample-ready');
+      status.classList.add('sample-loading');
+    }
     warmPianoSamples();
     return true;
   }
 
+  /* Salamander is a real sampled piano. Try mirrors so one blocked CDN does not
+     turn the whole piano into an oscillator fallback. */
   const pianoSampleBank = [
     { midi:36, name:'C2' }, { midi:43, name:'G2' }, { midi:48, name:'C3' },
     { midi:55, name:'G3' }, { midi:60, name:'C4' }, { midi:67, name:'G4' },
     { midi:72, name:'C5' }, { midi:79, name:'G5' }, { midi:84, name:'C6' }
   ];
+  const pianoSampleRoots = [
+    'https://tonejs.github.io/audio/salamander/',
+    'https://cdn.jsdelivr.net/gh/Tonejs/Tone.js@14.4.0/examples/audio/salamander/',
+    'https://raw.githubusercontent.com/Tonejs/Tone.js/dev/examples/audio/salamander/'
+  ];
   const pianoSampleCache = new Map();
   const pianoSampleLoading = new Map();
 
-  function sampleUrl(name) { return 'https://tonejs.github.io/audio/salamander/' + name + '.mp3'; }
+  function sampleUrls(name) {
+    return pianoSampleRoots.map(root => root + name + '.mp3');
+  }
   function nearestPianoSample(midi) {
-    return pianoSampleBank.reduce((best, sample) => Math.abs(sample.midi - midi) < Math.abs(best.midi - midi) ? sample : best, pianoSampleBank[0]);
+    return pianoSampleBank.reduce(
+      (best, sample) => Math.abs(sample.midi - midi) < Math.abs(best.midi - midi) ? sample : best,
+      pianoSampleBank[0]
+    );
   }
   async function loadPianoSample(sample) {
     if (pianoSampleCache.has(sample.name)) return pianoSampleCache.get(sample.name);
     if (pianoSampleLoading.has(sample.name)) return pianoSampleLoading.get(sample.name);
-    const loading = fetch(sampleUrl(sample.name)).then(response => {
-      if (!response.ok) throw new Error('sample fetch failed');
-      return response.arrayBuffer();
-    }).then(data => state.audio.decodeAudioData(data)).then(buffer => {
-      pianoSampleCache.set(sample.name, buffer); return buffer;
-    }).finally(() => pianoSampleLoading.delete(sample.name));
+    const loading = (async () => {
+      let lastError = null;
+      for (const url of sampleUrls(sample.name)) {
+        try {
+          const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+          if (!response.ok) throw new Error('sample fetch failed: ' + response.status);
+          const data = await response.arrayBuffer();
+          const buffer = await state.audio.decodeAudioData(data);
+          pianoSampleCache.set(sample.name, buffer);
+          return buffer;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      throw lastError || new Error('piano sample unavailable');
+    })().finally(() => pianoSampleLoading.delete(sample.name));
     pianoSampleLoading.set(sample.name, loading);
     return loading;
   }
   async function warmPianoSamples() {
-    try {
-      await Promise.all([loadPianoSample(pianoSampleBank[4]), loadPianoSample(pianoSampleBank[5])]);
-      const status = $('#audioStatus');
-      if (status) { status.textContent = 'HQ sampled piano ready'; status.classList.remove('sample-loading'); status.classList.add('sample-ready'); }
-    } catch (error) {
-      const status = $('#audioStatus'); if (status) status.textContent = 'Sample unavailable · fallback piano ready';
+    const status = $('#audioStatus');
+    const anchors = [pianoSampleBank[4], pianoSampleBank[5], pianoSampleBank[6]];
+    const results = await Promise.all(anchors.map(sample => loadPianoSample(sample).catch(() => null)));
+    if (!status) return;
+    if (results.some(Boolean)) {
+      status.textContent = 'HQ sampled piano ready';
+      status.classList.remove('sample-loading');
+      status.classList.add('sample-ready');
+    } else {
+      status.textContent = 'Sample server unavailable · enhanced fallback ready';
+      status.classList.remove('sample-loading');
     }
   }
-  function frequency(midi) { return 440 * Math.pow(2, (midi - 69) / 12); }
+  function frequency(midi) {
+    return 440 * Math.pow(2, (Number(midi) - 69) / 12);
+  }
+
   function releaseVoice(midi) {
     const voice = state.activeVoices.get(midi);
     if (!voice || !state.audio) return;
     const now = state.audio.currentTime;
-    try { voice.gain.gain.cancelScheduledValues(now); voice.gain.gain.setTargetAtTime(0.0001, now, 0.18); voice.source.stop(now + 0.75); } catch (error) {}
+    try {
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setTargetAtTime(0.0001, now, 0.18);
+      (voice.sources || [voice.source]).forEach(source => source.stop(now + 0.75));
+    } catch (error) {}
     state.activeVoices.delete(midi);
   }
   function startFallbackVoice(midi, duration) {
     const now = state.audio.currentTime;
-    const source = state.audio.createOscillator(); const gain = state.audio.createGain(); const filter = state.audio.createBiquadFilter();
-    source.type = 'triangle'; source.frequency.setValueAtTime(frequency(midi), now); filter.type = 'lowpass'; filter.frequency.setValueAtTime(5200, now);
-    gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.32, now + 0.01); gain.gain.exponentialRampToValueAtTime(0.12, now + 0.3); gain.gain.setTargetAtTime(0.0001, now + duration, 0.24);
-    source.connect(filter); filter.connect(gain); gain.connect(state.master);
-    const voice = { source:source, gain:gain }; state.activeVoices.set(midi, voice);
-    source.onended = () => { if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi); };
-    source.start(now); source.stop(now + duration + 1.2);
+    const base = frequency(midi);
+    const mix = state.audio.createGain();
+    const filter = state.audio.createBiquadFilter();
+    const gain = state.audio.createGain();
+    const partials = [[1, 0.72], [2, 0.22], [3, 0.10], [4, 0.045]];
+    const sources = [];
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(4600, now);
+    mix.gain.value = 0.72;
+    partials.forEach(([ratio, level], index) => {
+      const source = state.audio.createOscillator();
+      const partialGain = state.audio.createGain();
+      source.type = index === 0 ? 'triangle' : 'sine';
+      source.frequency.setValueAtTime(base * ratio, now);
+      source.detune.setValueAtTime(index === 0 ? 0 : (index % 2 ? -2 : 2), now);
+      partialGain.gain.value = level;
+      source.connect(partialGain);
+      partialGain.connect(mix);
+      sources.push(source);
+    });
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.28, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.10, now + 0.30);
+    gain.gain.setTargetAtTime(0.0001, now + duration, 0.24);
+    mix.connect(filter);
+    filter.connect(gain);
+    gain.connect(state.master);
+    const voice = { source: sources[0], sources, gain };
+    state.activeVoices.set(midi, voice);
+    sources.forEach(source => {
+      source.onended = () => {
+        if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi);
+      };
+      source.start(now);
+      source.stop(now + duration + 1.2);
+    });
   }
+
   async function playTone(midi, duration) {
     if (!ensureAudio()) return;
     const numeric = Number(midi); const naturalRelease = duration || 1.8; const sample = nearestPianoSample(numeric);
@@ -968,7 +1042,7 @@
       const song = event.target.closest('[data-song]');
       if (song) { playSongById(song.dataset.song); return; }
       const action = event.target.closest('[data-action]');
-      if (action) { const type = action.dataset.action; if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
+      if (action) { const type = action.dataset.action; if (type === 'menu') { const app = document.querySelector('.app'); if (app) app.classList.toggle('menu-open'); return; } if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
     });
     document.addEventListener('keydown', event => {
       if (event.code === 'Space' && state.view === 'pianoVisualizer' && ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) < 0) { event.preventDefault(); if (event.repeat) return; toggleSustain(true); }

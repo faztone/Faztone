@@ -9,6 +9,11 @@
     audio: null,
     master: null,
     activeVoices: new Map(),
+    heldHotkeys: new Set(),
+    pointerNotes: new Map(),
+    deferredReleases: new Set(),
+    compressor: null,
+    reverbInput: null,
     sustain: false,
     chordMode: false,
     selectedChord: new Set(),
@@ -704,6 +709,24 @@
     }
   }
 
+  function createPianoImpulse(context) {
+    const seconds = 2.35;
+    const impulse = context.createBuffer(2, Math.floor(context.sampleRate * seconds), context.sampleRate);
+    for (let channel = 0; channel < impulse.numberOfChannels; channel += 1) {
+      const data = impulse.getChannelData(channel);
+      for (let i = 0; i < data.length; i += 1) {
+        const decay = Math.pow(1 - i / data.length, 2.8);
+        data[i] = (Math.random() * 2 - 1) * decay * (channel ? 0.86 : 1);
+      }
+    }
+    return impulse;
+  }
+
+  function connectPianoVoice(node) {
+    node.connect(state.master);
+    if (state.reverbInput) node.connect(state.reverbInput);
+  }
+
   function ensureAudio() {
     if (state.audio) {
       if (state.audio.state === 'suspended') state.audio.resume();
@@ -712,16 +735,35 @@
     const AudioCtor = window.AudioContext || window.webkitAudioContext;
     if (!AudioCtor) {
       const status = $('#audioStatus');
-      if (status) status.textContent = 'Browser audio unavailable';
+      if (status) status.textContent = 'Audio tidak didukung browser ini';
       return false;
     }
-    state.audio = new AudioCtor();
+    state.audio = new AudioCtor({ latencyHint:'interactive' });
     state.master = state.audio.createGain();
-    state.master.gain.value = 0.72;
-    state.master.connect(state.audio.destination);
+    state.compressor = state.audio.createDynamicsCompressor();
+    const convolver = state.audio.createConvolver();
+    const wet = state.audio.createGain();
+    state.reverbInput = state.audio.createGain();
+
+    state.master.gain.value = Number($('#pianoVolume') ? $('#pianoVolume').value : 0.72);
+    state.compressor.threshold.value = -18;
+    state.compressor.knee.value = 18;
+    state.compressor.ratio.value = 4;
+    state.compressor.attack.value = 0.004;
+    state.compressor.release.value = 0.28;
+    convolver.buffer = createPianoImpulse(state.audio);
+    state.reverbInput.gain.value = 0.18;
+    wet.gain.value = 0.24;
+
+    state.master.connect(state.compressor);
+    state.reverbInput.connect(convolver);
+    convolver.connect(wet);
+    wet.connect(state.compressor);
+    state.compressor.connect(state.audio.destination);
+
     const status = $('#audioStatus');
     if (status) {
-      status.textContent = 'Loading HQ piano samples…';
+      status.textContent = 'Memuat Studio Grand samples…';
       status.classList.remove('sample-ready');
       status.classList.add('sample-loading');
     }
@@ -729,41 +771,56 @@
     return true;
   }
 
-  /* Salamander is a real sampled piano. Try mirrors so one blocked CDN does not
-     turn the whole piano into an oscillator fallback. */
+  /* Salamander Grand Piano: file names follow the original Tone.js bank
+     (Ds/Fs, not D#/F#). Dense anchors keep pitch shifting below 3 semitones. */
   const pianoSampleBank = [
-    { midi:36, name:'C2' }, { midi:43, name:'G2' }, { midi:48, name:'C3' },
-    { midi:55, name:'G3' }, { midi:60, name:'C4' }, { midi:67, name:'G4' },
-    { midi:72, name:'C5' }, { midi:79, name:'G5' }, { midi:84, name:'C6' }
+    { midi:36, name:'C2', file:'C2.mp3' },
+    { midi:39, name:'D#2', file:'Ds2.mp3' },
+    { midi:42, name:'F#2', file:'Fs2.mp3' },
+    { midi:45, name:'A2', file:'A2.mp3' },
+    { midi:48, name:'C3', file:'C3.mp3' },
+    { midi:51, name:'D#3', file:'Ds3.mp3' },
+    { midi:54, name:'F#3', file:'Fs3.mp3' },
+    { midi:57, name:'A3', file:'A3.mp3' },
+    { midi:60, name:'C4', file:'C4.mp3' },
+    { midi:63, name:'D#4', file:'Ds4.mp3' },
+    { midi:66, name:'F#4', file:'Fs4.mp3' },
+    { midi:69, name:'A4', file:'A4.mp3' },
+    { midi:72, name:'C5', file:'C5.mp3' },
+    { midi:75, name:'D#5', file:'Ds5.mp3' },
+    { midi:78, name:'F#5', file:'Fs5.mp3' },
+    { midi:81, name:'A5', file:'A5.mp3' },
+    { midi:84, name:'C6', file:'C6.mp3' }
   ];
   const pianoSampleRoots = [
     'https://tonejs.github.io/audio/salamander/',
-    'https://cdn.jsdelivr.net/gh/Tonejs/Tone.js@14.4.0/examples/audio/salamander/',
-    'https://raw.githubusercontent.com/Tonejs/Tone.js/dev/examples/audio/salamander/'
+    'https://cdn.jsdelivr.net/gh/Tonejs/Tone.js@14.4.0/examples/audio/salamander/'
   ];
   const pianoSampleCache = new Map();
   const pianoSampleLoading = new Map();
 
-  function sampleUrls(name) {
-    return pianoSampleRoots.map(root => root + name + '.mp3');
+  function sampleUrls(sample) {
+    return pianoSampleRoots.map(root => root + sample.file);
   }
+
   function nearestPianoSample(midi) {
     return pianoSampleBank.reduce(
       (best, sample) => Math.abs(sample.midi - midi) < Math.abs(best.midi - midi) ? sample : best,
       pianoSampleBank[0]
     );
   }
+
   async function loadPianoSample(sample) {
     if (pianoSampleCache.has(sample.name)) return pianoSampleCache.get(sample.name);
     if (pianoSampleLoading.has(sample.name)) return pianoSampleLoading.get(sample.name);
     const loading = (async () => {
       let lastError = null;
-      for (const url of sampleUrls(sample.name)) {
+      for (const url of sampleUrls(sample)) {
         try {
-          const response = await fetch(url, { mode: 'cors', cache: 'force-cache' });
+          const response = await fetch(url, { mode:'cors', cache:'force-cache' });
           if (!response.ok) throw new Error('sample fetch failed: ' + response.status);
           const data = await response.arrayBuffer();
-          const buffer = await state.audio.decodeAudioData(data);
+          const buffer = await state.audio.decodeAudioData(data.slice(0));
           pianoSampleCache.set(sample.name, buffer);
           return buffer;
         } catch (error) {
@@ -775,88 +832,160 @@
     pianoSampleLoading.set(sample.name, loading);
     return loading;
   }
+
   async function warmPianoSamples() {
     const status = $('#audioStatus');
-    const anchors = [pianoSampleBank[4], pianoSampleBank[5], pianoSampleBank[6]];
-    const results = await Promise.all(anchors.map(sample => loadPianoSample(sample).catch(() => null)));
-    if (!status) return;
-    if (results.some(Boolean)) {
-      status.textContent = 'HQ sampled piano ready';
-      status.classList.remove('sample-loading');
-      status.classList.add('sample-ready');
-    } else {
-      status.textContent = 'Sample server unavailable · enhanced fallback ready';
-      status.classList.remove('sample-loading');
+    const first = [nearestPianoSample(57), nearestPianoSample(60), nearestPianoSample(69), nearestPianoSample(72)];
+    const results = await Promise.all(first.map(sample => loadPianoSample(sample).catch(() => null)));
+    if (status) {
+      if (results.filter(Boolean).length >= 2) {
+        status.textContent = 'Studio Grand · HQ samples ready';
+        status.classList.remove('sample-loading');
+        status.classList.add('sample-ready');
+      } else {
+        status.textContent = 'Studio Grand · modeled fallback';
+        status.classList.remove('sample-loading');
+      }
     }
+    const preload = () => pianoSampleBank.forEach(sample => loadPianoSample(sample).catch(() => null));
+    if ('requestIdleCallback' in window) window.requestIdleCallback(preload, { timeout:3500 });
+    else window.setTimeout(preload, 900);
   }
+
   function frequency(midi) {
     return 440 * Math.pow(2, (Number(midi) - 69) / 12);
   }
 
-  function releaseVoice(midi) {
-    const voice = state.activeVoices.get(midi);
+  function finishVoice(midi, voice) {
+    if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi);
+  }
+
+  function releaseVoice(midi, fast) {
+    const numeric = Number(midi);
+    const voice = state.activeVoices.get(numeric);
     if (!voice || !state.audio) return;
     const now = state.audio.currentTime;
+    const release = fast ? 0.07 : 0.3;
     try {
       voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setTargetAtTime(0.0001, now, 0.18);
-      (voice.sources || [voice.source]).forEach(source => source.stop(now + 0.75));
+      voice.gain.gain.setTargetAtTime(0.0001, now, release);
+      (voice.sources || [voice.source]).filter(Boolean).forEach(source => {
+        try { source.stop(now + Math.max(0.32, release * 5)); } catch (error) {}
+      });
     } catch (error) {}
-    state.activeVoices.delete(midi);
+    state.activeVoices.delete(numeric);
   }
-  function startFallbackVoice(midi, duration) {
+
+  function startFallbackVoice(midi, duration, velocity) {
     const now = state.audio.currentTime;
     const base = frequency(midi);
-    const mix = state.audio.createGain();
-    const filter = state.audio.createBiquadFilter();
-    const gain = state.audio.createGain();
-    const partials = [[1, 0.72], [2, 0.22], [3, 0.10], [4, 0.045]];
+    const output = state.audio.createGain();
+    const tone = state.audio.createBiquadFilter();
+    const body = state.audio.createBiquadFilter();
     const sources = [];
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(4600, now);
-    mix.gain.value = 0.72;
-    partials.forEach(([ratio, level], index) => {
+    const intensity = Math.max(0.25, Math.min(1, velocity || 0.82));
+
+    tone.type = 'lowpass';
+    tone.frequency.setValueAtTime(Math.min(9200, 3800 + midi * 55), now);
+    tone.Q.value = 0.65;
+    body.type = 'peaking';
+    body.frequency.value = midi < 55 ? 190 : 420;
+    body.Q.value = 0.9;
+    body.gain.value = midi < 55 ? 4.2 : 2.2;
+
+    [[-2.7,0.48],[0,0.68],[2.2,0.42]].forEach((pair, index) => {
       const source = state.audio.createOscillator();
-      const partialGain = state.audio.createGain();
-      source.type = index === 0 ? 'triangle' : 'sine';
-      source.frequency.setValueAtTime(base * ratio, now);
-      source.detune.setValueAtTime(index === 0 ? 0 : (index % 2 ? -2 : 2), now);
-      partialGain.gain.value = level;
-      source.connect(partialGain);
-      partialGain.connect(mix);
+      const partial = state.audio.createGain();
+      source.type = index === 1 ? 'triangle' : 'sine';
+      source.frequency.setValueAtTime(base, now);
+      source.detune.setValueAtTime(pair[0], now);
+      partial.gain.value = pair[1];
+      source.connect(partial);
+      partial.connect(tone);
       sources.push(source);
     });
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.28, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.10, now + 0.30);
-    gain.gain.setTargetAtTime(0.0001, now + duration, 0.24);
-    mix.connect(filter);
-    filter.connect(gain);
-    gain.connect(state.master);
-    const voice = { source: sources[0], sources, gain };
+
+    const overtone = state.audio.createOscillator();
+    const overtoneGain = state.audio.createGain();
+    overtone.type = 'sine';
+    overtone.frequency.value = base * 2.003;
+    overtoneGain.gain.value = midi < 60 ? 0.12 : 0.19;
+    overtone.connect(overtoneGain);
+    overtoneGain.connect(tone);
+    sources.push(overtone);
+
+    const hammerBuffer = state.audio.createBuffer(1, Math.floor(state.audio.sampleRate * 0.035), state.audio.sampleRate);
+    const hammerData = hammerBuffer.getChannelData(0);
+    for (let i = 0; i < hammerData.length; i += 1) hammerData[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / hammerData.length, 4);
+    const hammer = state.audio.createBufferSource();
+    const hammerFilter = state.audio.createBiquadFilter();
+    const hammerGain = state.audio.createGain();
+    hammer.buffer = hammerBuffer;
+    hammerFilter.type = 'bandpass';
+    hammerFilter.frequency.value = Math.min(5400, 1200 + midi * 44);
+    hammerFilter.Q.value = 0.8;
+    hammerGain.gain.value = 0.06 * intensity;
+    hammer.connect(hammerFilter);
+    hammerFilter.connect(hammerGain);
+    hammerGain.connect(body);
+    sources.push(hammer);
+
+    output.gain.setValueAtTime(0.0001, now);
+    output.gain.exponentialRampToValueAtTime(0.22 * intensity, now + 0.008);
+    output.gain.exponentialRampToValueAtTime(0.095 * intensity, now + 0.42);
+    output.gain.setTargetAtTime(0.0001, now + Math.max(1.2, duration || 2), 0.52);
+
+    tone.connect(body);
+    body.connect(output);
+    connectPianoVoice(output);
+    const voice = { source:sources[0], sources, gain:output };
+    const previous = state.activeVoices.get(midi);
+    if (previous) releaseVoice(midi, true);
     state.activeVoices.set(midi, voice);
     sources.forEach(source => {
-      source.onended = () => {
-        if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi);
-      };
+      source.onended = () => finishVoice(midi, voice);
       source.start(now);
-      source.stop(now + duration + 1.2);
+      source.stop(now + Math.max(3, (duration || 2) + 2.2));
     });
   }
 
-  async function playTone(midi, duration) {
+  async function playTone(midi, duration, velocity) {
     if (!ensureAudio()) return;
-    const numeric = Number(midi); const naturalRelease = duration || 1.8; const sample = nearestPianoSample(numeric);
-    try {
-      const buffer = await loadPianoSample(sample);
-      const now = state.audio.currentTime; const source = state.audio.createBufferSource(); const gain = state.audio.createGain(); const filter = state.audio.createBiquadFilter();
-      source.buffer = buffer; source.playbackRate.value = Math.pow(2, (numeric - sample.midi) / 12); filter.type = 'lowpass'; filter.frequency.setValueAtTime(7600, now);
-      gain.gain.setValueAtTime(0.0001, now); gain.gain.exponentialRampToValueAtTime(0.62, now + 0.012); gain.gain.exponentialRampToValueAtTime(0.24, now + 0.36); gain.gain.setTargetAtTime(0.0001, now + naturalRelease, 0.3);
-      source.connect(filter); filter.connect(gain); gain.connect(state.master);
-      const voice = { source:source, gain:gain }; state.activeVoices.set(numeric, voice);
-      source.onended = () => { if (state.activeVoices.get(numeric) === voice) state.activeVoices.delete(numeric); };
-      source.start(now); source.stop(now + naturalRelease + 2);
-    } catch (error) { startFallbackVoice(numeric, naturalRelease); }
+    const numeric = Number(midi);
+    const naturalRelease = duration || 2.4;
+    const intensity = Math.max(0.25, Math.min(1, velocity || 0.86));
+    const sample = nearestPianoSample(numeric);
+    let buffer = pianoSampleCache.get(sample.name);
+
+    if (!buffer) {
+      startFallbackVoice(numeric, naturalRelease, intensity * 0.78);
+      loadPianoSample(sample).catch(() => null);
+      return;
+    }
+
+    const previous = state.activeVoices.get(numeric);
+    if (previous) releaseVoice(numeric, true);
+    const now = state.audio.currentTime;
+    const source = state.audio.createBufferSource();
+    const filter = state.audio.createBiquadFilter();
+    const gain = state.audio.createGain();
+    source.buffer = buffer;
+    source.playbackRate.value = Math.pow(2, (numeric - sample.midi) / 12);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(Math.min(11000, 6300 + intensity * 3600), now);
+    filter.Q.value = 0.55;
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.5 * intensity, now + 0.007);
+    gain.gain.exponentialRampToValueAtTime(0.3 * intensity, now + 0.17);
+    gain.gain.setTargetAtTime(0.0001, now + naturalRelease, 0.52);
+    source.connect(filter);
+    filter.connect(gain);
+    connectPianoVoice(gain);
+    const voice = { source, sources:[source], gain };
+    state.activeVoices.set(numeric, voice);
+    source.onended = () => finishVoice(numeric, voice);
+    source.start(now);
+    source.stop(now + naturalRelease + 3.4);
   }
 
   function setKeyVisual(midi, active) {
@@ -889,27 +1018,38 @@
     updatePracticeStats();
   }
 
-  function triggerKey(midi, fromUser) {
+  function triggerKey(midi, fromUser, velocity) {
     const numeric = Number(midi);
     if (numeric < pianoMin || numeric > pianoMax) return;
-    if (fromUser) {
-      ensureAudio();
-      playTone(numeric, state.sustain ? 4 : 1.6);
-      setKeyVisual(numeric, true);
-      window.setTimeout(() => { if (!state.sustain) setKeyVisual(numeric, false); }, 180);
-      practiceHit(numeric);
-    } else {
-      playTone(numeric, 1.05);
-      setKeyVisual(numeric, true);
-      window.setTimeout(() => setKeyVisual(numeric, false), 260);
-    }
+    state.deferredReleases.delete(numeric);
+    playTone(numeric, state.sustain ? 8 : (fromUser ? 3.2 : 1.7), velocity || 0.88);
+    setKeyVisual(numeric, true);
+    if (fromUser) practiceHit(numeric);
+    else window.setTimeout(() => releaseKey(numeric), 520);
+  }
+
+  function releaseKey(midi) {
+    const numeric = Number(midi);
+    setKeyVisual(numeric, false);
+    if (state.sustain) state.deferredReleases.add(numeric);
+    else releaseVoice(numeric);
   }
 
   function toggleSustain(force) {
-    state.sustain = typeof force === 'boolean' ? force : !state.sustain;
+    const next = typeof force === 'boolean' ? force : !state.sustain;
+    if (next === state.sustain) return;
+    state.sustain = next;
     const labels = [$('#sustainToggle'), $('#sustainPedal')];
-    labels.forEach(el => { if (el) { el.textContent = state.sustain ? 'SUSTAIN: ON · Space' : 'SUSTAIN: OFF · Space'; el.classList.toggle('on', state.sustain); } });
-    if (!state.sustain) Array.from(state.activeVoices.keys()).forEach(releaseVoice);
+    labels.forEach(el => {
+      if (!el) return;
+      el.textContent = state.sustain ? 'SUSTAIN: ON · Space' : 'SUSTAIN: OFF · Space';
+      el.classList.toggle('on', state.sustain);
+      el.setAttribute('aria-pressed', String(state.sustain));
+    });
+    if (!state.sustain) {
+      Array.from(state.deferredReleases).forEach(releaseVoice);
+      state.deferredReleases.clear();
+    }
   }
 
   function selectChord(midi) {
@@ -924,7 +1064,8 @@
   function playSelectedChord() {
     const notes = Array.from(state.selectedChord);
     if (!notes.length) { showToast('Pilih beberapa not dulu.'); return; }
-    notes.forEach(note => triggerKey(note, true));
+    notes.forEach((note, index) => window.setTimeout(() => triggerKey(note, false, 0.82), index * 12));
+    window.setTimeout(() => notes.forEach(releaseKey), state.sustain ? 1600 : 1050);
     showToast('Chord dimainkan: ' + notes.map(noteLabel).join(' · '));
   }
 
@@ -1000,19 +1141,33 @@
     if (state.pianoReady) return;
     renderKeyboard();
     const keyboard = $('#visualizerKeyboard');
-    if (keyboard) keyboard.addEventListener('pointerdown', event => {
-      const key = event.target.closest('[data-midi]');
-      if (!key) return;
-      event.preventDefault();
-      const midi = Number(key.dataset.midi);
-      if (state.chordMode) selectChord(midi);
-      else triggerKey(midi, true);
-    });
-    $$('.chord-preset').forEach(button => button.addEventListener('click', () => applyChord(button.dataset.chord)));
+    if (keyboard) {
+      keyboard.addEventListener('pointerdown', event => {
+        const key = event.target.closest('[data-midi]');
+        if (!key) return;
+        event.preventDefault();
+        const midi = Number(key.dataset.midi);
+        if (state.chordMode) { selectChord(midi); return; }
+        try { key.setPointerCapture(event.pointerId); } catch (error) {}
+        state.pointerNotes.set(event.pointerId, midi);
+        triggerKey(midi, true, event.pointerType === 'mouse' ? 0.86 : 0.9);
+      });
+      const endPointer = event => {
+        if (!state.pointerNotes.has(event.pointerId)) return;
+        const midi = state.pointerNotes.get(event.pointerId);
+        state.pointerNotes.delete(event.pointerId);
+        releaseKey(midi);
+      };
+      keyboard.addEventListener('pointerup', endPointer);
+      keyboard.addEventListener('pointercancel', endPointer);
+      keyboard.addEventListener('lostpointercapture', endPointer);
+      keyboard.addEventListener('contextmenu', event => event.preventDefault());
+    }
+    $('.chord-preset').forEach(button => button.addEventListener('click', () => applyChord(button.dataset.chord)));
     const playChord = $('#playSelectedChord');
     if (playChord) playChord.addEventListener('click', playSelectedChord);
     const clearChord = $('#clearSelectedChord');
-    if (clearChord) clearChord.addEventListener('click', () => { state.selectedChord.clear(); $$('.white-key,.black-key').forEach(key => key.classList.remove('active')); const text = $('#selectedChordNotes'); if (text) text.textContent = 'No notes selected'; });
+    if (clearChord) clearChord.addEventListener('click', () => { state.selectedChord.clear(); $('.white-key,.black-key').forEach(key => key.classList.remove('active')); const text = $('#selectedChordNotes'); if (text) text.textContent = 'No notes selected'; });
     const chordToggle = $('#chordModeToggle');
     if (chordToggle) chordToggle.addEventListener('click', () => { state.chordMode = !state.chordMode; updateChordMode(); });
     const sustainToggle = $('#sustainToggle');
@@ -1026,7 +1181,10 @@
     const demo = $('#practiceDemo');
     if (demo) demo.addEventListener('click', () => startSong('furElise'));
     const volume = $('#pianoVolume');
-    if (volume) volume.addEventListener('input', () => { if (state.master) state.master.gain.value = Number(volume.value); });
+    if (volume) volume.addEventListener('input', () => {
+      if (!state.master || !state.audio) return;
+      state.master.gain.setTargetAtTime(Number(volume.value), state.audio.currentTime, 0.025);
+    });
     state.pianoReady = true;
   }
 
@@ -1419,13 +1577,36 @@
       if (action) { const type = action.dataset.action; if (type === 'menu') { const app = document.querySelector('.app'); if (app) app.classList.toggle('menu-open'); return; } if (type === 'catalogPiano') { showView('pianoVisualizer'); return; } if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
     });
     document.addEventListener('keydown', event => {
-      if (event.code === 'Space' && state.view === 'pianoVisualizer' && ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) < 0) { event.preventDefault(); if (event.repeat) return; toggleSustain(true); }
+      const editing = ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) >= 0;
+      if (event.code === 'Space' && state.view === 'pianoVisualizer' && !editing) {
+        event.preventDefault();
+        if (!event.repeat) toggleSustain(true);
+        return;
+      }
       if (event.key === 'Escape') stopSong();
-      if (state.view !== 'pianoVisualizer' || ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) >= 0) return;
-      const index = keyboardHotkeys.indexOf(event.key.toLowerCase());
-      if (index >= 0) triggerKey(pianoHotkeyStart + index, true);
+      if (state.view !== 'pianoVisualizer' || editing) return;
+      const keyName = event.key.toLowerCase();
+      const index = keyboardHotkeys.indexOf(keyName);
+      if (index >= 0) {
+        event.preventDefault();
+        if (state.heldHotkeys.has(keyName)) return;
+        state.heldHotkeys.add(keyName);
+        triggerKey(pianoHotkeyStart + index, true, 0.88);
+      }
     });
-    document.addEventListener('keyup', event => { if (event.code === 'Space') toggleSustain(false); });
+    document.addEventListener('keyup', event => {
+      if (event.code === 'Space') {
+        if (state.view === 'pianoVisualizer') event.preventDefault();
+        toggleSustain(false);
+        return;
+      }
+      const keyName = event.key.toLowerCase();
+      const index = keyboardHotkeys.indexOf(keyName);
+      if (index >= 0 && state.heldHotkeys.has(keyName)) {
+        state.heldHotkeys.delete(keyName);
+        releaseKey(pianoHotkeyStart + index);
+      }
+    });
 
   }
 

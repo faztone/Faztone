@@ -35,13 +35,20 @@
   };
   const chordMap = { C:[60,64,67], Am:[57,60,64], G:[55,59,62], F:[53,57,60] };
   const keyData = {
-    'C Major':['0♯','A Minor'],
-    'G Major':['1♯','E Minor'],
-    'D Major':['2♯','B Minor'],
-    'A Major':['3♯','F♯ Minor'],
-    'E Major':['4♯','C♯ Minor'],
-    'F Major':['1♭','D Minor'],
-    'Bb Major':['2♭','G Minor']
+    'C Major': { signature:'0♯', relative:'A Minor', root:0 },
+    'G Major': { signature:'1♯', relative:'E Minor', root:7 },
+    'D Major': { signature:'2♯', relative:'B Minor', root:2 },
+    'A Major': { signature:'3♯', relative:'F♯ Minor', root:9 },
+    'E Major': { signature:'4♯', relative:'C♯ Minor', root:4 },
+    'B Major': { signature:'5♯', relative:'G♯ Minor', root:11 },
+    'F♯ Major': { signature:'6♯', relative:'D♯ Minor', root:6 },
+    'C♯ Major': { signature:'7♯', relative:'A♯ Minor', root:1 },
+    'F Major': { signature:'1♭', relative:'D Minor', root:5 },
+    'Bb Major': { signature:'2♭', relative:'G Minor', root:10 },
+    'Eb Major': { signature:'3♭', relative:'C Minor', root:3 },
+    'Ab Major': { signature:'4♭', relative:'F Minor', root:8 },
+    'Db Major': { signature:'5♭', relative:'Bb Minor', root:1 },
+    'Gb Major': { signature:'6♭', relative:'Eb Minor', root:6 }
   };
 
 
@@ -156,59 +163,177 @@
     });
   }
 
+  function spectralMagnitude(data, start, windowSize, sampleRate, hz) {
+    let real = 0;
+    let imag = 0;
+    const stride = 4;
+    for (let n = 0; n < windowSize; n += stride) {
+      const value = data[start + n] * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / windowSize));
+      const phase = (2 * Math.PI * hz * n) / sampleRate;
+      real += value * Math.cos(phase);
+      imag -= value * Math.sin(phase);
+    }
+    return Math.sqrt(real * real + imag * imag) / (windowSize / stride);
+  }
+
   function estimateMajorKey(buffer) {
     const data = buffer.getChannelData(0);
     const sampleRate = buffer.sampleRate;
     const windowSize = 4096;
-    const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.25));
-    const limit = Math.min(data.length - windowSize, sampleRate * 30);
+    const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.5));
+    const limit = Math.max(0, Math.min(data.length - windowSize, sampleRate * 45));
     const histogram = new Array(12).fill(0);
+    let activeFrames = 0;
     for (let start = 0; start < limit; start += frameStep) {
-      for (let midi = 36; midi <= 83; midi += 1) {
+      let rms = 0;
+      for (let n = 0; n < windowSize; n += 8) rms += data[start + n] * data[start + n];
+      rms = Math.sqrt(rms / (windowSize / 8));
+      if (rms < 0.004) continue;
+      const frameChroma = new Array(12).fill(0);
+      for (let midi = 48; midi <= 84; midi += 1) {
         const hz = 440 * Math.pow(2, (midi - 69) / 12);
         if (hz >= sampleRate / 2) continue;
-        let real = 0; let imag = 0;
-        for (let n = 0; n < windowSize; n += 4) {
-          const value = data[start + n] * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / windowSize));
-          const phase = (2 * Math.PI * hz * n) / sampleRate;
-          real += value * Math.cos(phase);
-          imag -= value * Math.sin(phase);
-        }
-        histogram[midi % 12] += Math.sqrt(real * real + imag * imag);
+        const fundamental = spectralMagnitude(data, start, windowSize, sampleRate, hz);
+        const harmonic2 = hz * 2 < sampleRate / 2 ? spectralMagnitude(data, start, windowSize, sampleRate, hz * 2) : 0;
+        const harmonic3 = hz * 3 < sampleRate / 2 ? spectralMagnitude(data, start, windowSize, sampleRate, hz * 3) : 0;
+        frameChroma[midi % 12] += fundamental + harmonic2 * 0.45 + harmonic3 * 0.2;
+      }
+      const frameTotal = frameChroma.reduce((sum, value) => sum + value, 0);
+      if (frameTotal > 0) {
+        for (let pc = 0; pc < 12; pc += 1) histogram[pc] += frameChroma[pc] / frameTotal;
+        activeFrames += 1;
       }
     }
+    if (!activeFrames) return { key:'C Major', confidence:0, signal:false };
     const profile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
-    let bestRoot = 0; let bestScore = -Infinity;
+    const profileMean = profile.reduce((a,b) => a + b, 0) / 12;
+    const profileNorm = Math.sqrt(profile.reduce((sum,value) => sum + Math.pow(value - profileMean, 2), 0));
+    const scores = [];
     for (let root = 0; root < 12; root += 1) {
-      let score = 0;
-      for (let i = 0; i < 12; i += 1) score += histogram[(root + i) % 12] * profile[i];
-      if (score > bestScore) { bestScore = score; bestRoot = root; }
+      const values = profile.map((_, degree) => histogram[(root + degree) % 12]);
+      const mean = values.reduce((a,b) => a + b, 0) / 12;
+      const norm = Math.sqrt(values.reduce((sum,value) => sum + Math.pow(value - mean, 2), 0)) || 1;
+      let dot = 0;
+      for (let degree = 0; degree < 12; degree += 1) dot += (values[degree] - mean) * (profile[degree] - profileMean);
+      scores.push({ root:root, score:dot / (norm * profileNorm) });
     }
-    return noteNames[bestRoot] + ' Major';
+    scores.sort((a,b) => b.score - a.score);
+    const best = scores[0];
+    const second = scores[1] || { score:0 };
+    const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+    const confidence = Math.max(0, Math.min(99, Math.round(50 + (best.score - second.score) * 260)));
+    return { key:names[best.root] + ' Major', confidence:confidence, signal:true };
+  }
+
+  function detectTempoBpm(buffer) {
+    const data = buffer.getChannelData(0);
+    const sampleRate = buffer.sampleRate;
+    const frameSize = 1024;
+    const hop = 512;
+    const envelope = [];
+    const limit = Math.min(data.length - frameSize, sampleRate * 60);
+    let previous = 0;
+    for (let start = 0; start < limit; start += hop) {
+      let energy = 0;
+      for (let n = 0; n < frameSize; n += 4) {
+        const value = data[start + n];
+        energy += value * value;
+      }
+      const rms = Math.sqrt(energy / (frameSize / 4));
+      envelope.push(Math.max(0, rms - previous));
+      previous = previous * 0.7 + rms * 0.3;
+    }
+    const envelopeRate = sampleRate / hop;
+    let bestBpm = 0;
+    let bestScore = -Infinity;
+    for (let bpm = 60; bpm <= 180; bpm += 1) {
+      const lag = Math.max(1, Math.round((60 / bpm) * envelopeRate));
+      let score = 0;
+      for (let i = lag; i < envelope.length; i += 1) score += envelope[i] * envelope[i - lag];
+      if (score > bestScore) { bestScore = score; bestBpm = bpm; }
+    }
+    if (!bestBpm || !isFinite(bestScore) || bestScore <= 0) return { bpm:null, confidence:0 };
+    const confidence = Math.max(0, Math.min(99, Math.round(Math.min(1, bestScore * 250) * 100)));
+    return { bpm:bestBpm, confidence:confidence };
+  }
+
+  function updateTonal(value, confidence) {
+    const data = keyData[value] || keyData['C Major'];
+    const result = $('#tonalResult'); const sharp = $('#tonalSharp'); const minor = $('#relativeMinor'); const confidenceEl = $('#tonalConfidence'); const summary = $('#tonalSummary');
+    if (result) result.textContent = value;
+    if (sharp) sharp.textContent = data.signature;
+    if (minor) minor.textContent = data.relative;
+    if (confidenceEl) confidenceEl.textContent = 'Key confidence: ' + (typeof confidence === 'number' ? confidence + '%' : '—');
+    if (summary) summary.textContent = 'Tonal ' + value + ' · signature ' + data.signature + ' · relative minor ' + data.relative;
+    const select = $('#tonalSelect'); if (select) select.value = value;
+  }
+
+  function updateTempo(tempo, confidence) {
+    const tempoEl = $('#tonalTempo');
+    if (tempoEl) tempoEl.textContent = tempo ? tempo + ' BPM' : '— BPM';
+    const summary = $('#tonalSummary');
+    if (summary && tempo) summary.textContent += ' · tempo ' + tempo + ' BPM';
+    const status = $('#tonalStatus');
+    if (status && tempo) status.textContent += ' Tempo: ' + tempo + ' BPM.';
+  }
+
+  async function decodeTonalFile(file) {
+    if (!file) throw new Error('No audio file');
+    if (state.tonalFile === file && state.tonalBuffer) return state.tonalBuffer;
+    if (!ensureAudio()) throw new Error('AudioContext unavailable');
+    state.tonalBuffer = await state.audio.decodeAudioData(await file.arrayBuffer());
+    state.tonalFile = file;
+    return state.tonalBuffer;
   }
 
   async function analyzeTonalFile(file) {
     const status = $('#tonalStatus');
-    if (!file) return;
-    if (status) status.textContent = 'Menganalisis 30 detik pertama audio…';
+    if (!file) { if (status) status.textContent = 'Pilih file audio terlebih dahulu.'; return; }
+    if (status) status.textContent = 'Menganalisis tonal dan tempo…';
     try {
-      if (!ensureAudio()) throw new Error('AudioContext unavailable');
-      const buffer = await state.audio.decodeAudioData(await file.arrayBuffer());
-      const key = estimateMajorKey(buffer);
-      updateTonal(key);
-      if (status) status.textContent = 'Selesai. Kandidat tonal Major: ' + key + '.';
-      showToast('Tonal terdeteksi: ' + key);
+      const buffer = await decodeTonalFile(file);
+      const result = estimateMajorKey(buffer);
+      const tempo = detectTempoBpm(buffer);
+      updateTonal(result.key, result.confidence);
+      updateTempo(tempo.bpm, tempo.confidence);
+      if (status) status.textContent = result.signal ? 'Analisis selesai. Kandidat Major ditemukan.' : 'Sinyal musik terlalu lemah untuk dipastikan.';
+      showToast('Tonal ' + result.key + ' · ' + (tempo.bpm || '—') + ' BPM');
     } catch (error) {
-      if (status) status.textContent = 'Audio tidak bisa dianalisis di browser ini. Coba file WAV/MP3 lain.';
-      showToast('Analisis tonal gagal.');
+      if (status) status.textContent = 'Audio tidak bisa dianalisis. Coba WAV/MP3 lain yang berisi musik.';
+      showToast('Analisis audio gagal.');
+    }
+  }
+
+  async function analyzeTempoFile(file) {
+    const status = $('#tonalStatus');
+    if (!file) { if (status) status.textContent = 'Pilih file audio terlebih dahulu.'; return; }
+    if (status) status.textContent = 'Mendeteksi tempo…';
+    try {
+      const buffer = await decodeTonalFile(file);
+      const tempo = detectTempoBpm(buffer);
+      updateTempo(tempo.bpm, tempo.confidence);
+      if (status) status.textContent = tempo.bpm ? 'Tempo terdeteksi.' : 'Beat terlalu lemah untuk menentukan tempo.';
+      showToast(tempo.bpm ? tempo.bpm + ' BPM' : 'Tempo tidak ditemukan');
+    } catch (error) {
+      if (status) status.textContent = 'Tempo detector gagal membaca file.';
     }
   }
 
   function setupTonalAnalyzer() {
-    const file = $('#tonalFile'); const analyze = $('#tonalAnalyze'); const preview = $('#tonalPreview');
+    const file = $('#tonalFile'); const analyze = $('#tonalAnalyze'); const tempoButton = $('#tempoAnalyze'); const preview = $('#tonalPreview');
     if (!file || !analyze) return;
-    file.addEventListener('change', () => { const selected = file.files && file.files[0]; if (selected && preview) preview.src = URL.createObjectURL(selected); });
+    file.addEventListener('change', () => { const selected = file.files && file.files[0]; state.tonalBuffer = null; state.tonalFile = null; if (selected && preview) preview.src = URL.createObjectURL(selected); });
     analyze.addEventListener('click', () => analyzeTonalFile(file.files && file.files[0]));
+    if (tempoButton) tempoButton.addEventListener('click', () => analyzeTempoFile(file.files && file.files[0]));
+  }
+
+  function resetTonalAnalysis() {
+    updateTonal('C Major', 0);
+    updateTempo(null, 0);
+    const status = $('#tonalStatus'); const confidence = $('#tonalConfidence'); const summary = $('#tonalSummary');
+    if (status) status.textContent = 'Belum ada audio. Pilih file untuk mulai analisis.';
+    if (confidence) confidence.textContent = 'Key confidence: —';
+    if (summary) summary.textContent = 'Belum ada hasil analisis.';
   }
 
   function setAuthSession(session) {
@@ -612,7 +737,7 @@
       const song = event.target.closest('[data-song]');
       if (song) { playSongById(song.dataset.song); return; }
       const action = event.target.closest('[data-action]');
-      if (action) { const type = action.dataset.action; if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); }
+      if (action) { const type = action.dataset.action; if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
     });
     document.addEventListener('keydown', event => {
       if (event.code === 'Space' && state.view === 'pianoVisualizer' && ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) < 0) { event.preventDefault(); if (event.repeat) return; toggleSustain(true); }

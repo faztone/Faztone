@@ -96,7 +96,7 @@
   const renderRecentSongs = () => { $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join(''); };
   renderRecentSongs();
   const progressionMarkup = item => `<div class="progress-row"><button class="play-small" data-progression="${item.title}">${iconSvg('play')}</button><div class="progress-meta"><strong>${item.title}</strong><small>${item.chords}</small></div><span class="tag ${item.className}">${item.tag}</span><button class="more">${iconSvg('more')}</button></div>`;
-  const renderSavedProgressions = () => { $('#savedProgressions').innerHTML = progressions.map(progressionMarkup).join(''); };
+  const renderSavedProgressions = () => { const target = $('#savedProgressions'); if (target) target.innerHTML = progressions.map(progressionMarkup).join(''); };
   renderSavedProgressions();
 
   const libraryMarkup = (song,index) => `<div class="mini-card"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">${iconSvg('play')}</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div style="min-width:0;flex:1"><h3>${song.title}</h3><p>${song.artist} · Key ${song.key} · ${song.bpm} BPM</p></div><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${iconSvg('heart')}</button></div>`;
@@ -128,7 +128,13 @@
     const progression = event.target.closest('[data-progression]')?.dataset.progression;
     if (progression) {
       const item = progressions.find(entry => entry.title === progression);
-      if (item) { $('#progressionPattern').textContent = item.chords.replaceAll(' · ',' – '); $('#progressionTempo').textContent = item.tempo || 92; playProgression(item); }
+      if (item) {
+        selectedProgression = item;
+        progressionShift = 0;
+        renderProgressionEditor();
+        $('#progressionTempo').textContent = item.tempo || 92;
+        playProgression(item);
+      }
     }
     const favoriteIndex = event.target.closest('[data-favorite]')?.dataset.favorite;
     if (favoriteIndex !== undefined) {
@@ -254,22 +260,59 @@
 
   const miniPiano = $('#miniPiano');
   const miniNotes = ['C','D','E','F','G','A','B','C'];
-  miniPiano.innerHTML = miniNotes.map((note,index) => `<button class="white" data-note="${note}" data-index="${index}" aria-label="${note}"></button>`).join('') + '<button class="black" style="left:12.5%" data-note="C#"></button><button class="black" style="left:25%" data-note="D#"></button><button class="black" style="left:50%" data-note="F#"></button><button class="black" style="left:62.5%" data-note="G#"></button><button class="black" style="left:75%" data-note="A#"></button>';
+  miniPiano.innerHTML = miniNotes.map((note,index) => `<button class="white" data-note="${note}" data-index="${[0,2,4,5,7,9,11,12][index]}" aria-label="${note}"></button>`).join('') + '<button class="black" style="left:12.5%" data-note="C#" data-index="1"></button><button class="black" style="left:25%" data-note="D#" data-index="3"></button><button class="black" style="left:50%" data-note="F#" data-index="6"></button><button class="black" style="left:62.5%" data-note="G#" data-index="8"></button><button class="black" style="left:75%" data-note="A#" data-index="10"></button>';
   let audioContext;
-  const playTone = (noteIndex, duration=.45) => {
+  const pianoBuffers = {};
+  const pianoLoads = {};
+  const pianoSampleNotes = [
+    {name:'C2', midi:36},
+    {name:'C3', midi:48},
+    {name:'C4', midi:60},
+    {name:'C5', midi:72},
+    {name:'C6', midi:84}
+  ];
+  const loadPianoSample = async sample => {
+    if (pianoBuffers[sample.name]) return pianoBuffers[sample.name];
+    if (!pianoLoads[sample.name]) {
+      pianoLoads[sample.name] = fetch(`https://tonejs.github.io/audio/salamander/${sample.name}.mp3`)
+        .then(response => { if (!response.ok) throw new Error('Piano sample unavailable'); return response.arrayBuffer(); })
+        .then(data => audioContext.decodeAudioData(data))
+        .then(buffer => { pianoBuffers[sample.name] = buffer; return buffer; });
+    }
+    return pianoLoads[sample.name];
+  };
+  const playTone = async (noteIndex, duration=.9) => {
     const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return;
+    if (!Ctor) { if ($('#pianoStatus')) $('#pianoStatus').textContent='Browser audio is not supported'; return; }
     audioContext ||= new Ctor();
-    if (audioContext.state === 'suspended') audioContext.resume();
-    const oscillator = audioContext.createOscillator(); const gain = audioContext.createGain(); const now=audioContext.currentTime;
-    oscillator.type='triangle'; oscillator.frequency.value=261.63*Math.pow(2,noteIndex/12); gain.gain.setValueAtTime(.0001,now); gain.gain.exponentialRampToValueAtTime(.12,now+.015); gain.gain.exponentialRampToValueAtTime(.0001,now+duration); oscillator.connect(gain).connect(audioContext.destination); oscillator.start(now); oscillator.stop(now+duration+.02);
+    if (audioContext.state === 'suspended') await audioContext.resume();
+    const midi = 60 + Number(noteIndex || 0);
+    const sample = pianoSampleNotes.reduce((nearest,current) => Math.abs(current.midi-midi) < Math.abs(nearest.midi-midi) ? current : nearest, pianoSampleNotes[0]);
+    try {
+      const buffer = await loadPianoSample(sample);
+      const source = audioContext.createBufferSource();
+      const gain = audioContext.createGain();
+      const now = audioContext.currentTime;
+      source.buffer = buffer;
+      source.playbackRate.value = Math.pow(2, (midi - sample.midi) / 12);
+      gain.gain.setValueAtTime(.0001, now);
+      gain.gain.exponentialRampToValueAtTime(.32, now + .015);
+      gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
+      source.connect(gain).connect(audioContext.destination);
+      source.start(now);
+      source.stop(now + Math.min(buffer.duration / source.playbackRate.value, duration + 1.2));
+      if ($('#pianoStatus')) $('#pianoStatus').textContent = 'Real piano sample · ready';
+    } catch (error) {
+      if ($('#pianoStatus')) $('#pianoStatus').textContent = 'Piano sample gagal dimuat';
+      toast('Piano sample gagal dimuat');
+    }
   };
   $$('#miniPiano [data-note]').forEach(key => key.addEventListener('click', () => { const index=Number(key.dataset.index||0); key.classList.add('active'); setTimeout(()=>key.classList.remove('active'),180); playTone(index); toast(`Playing ${key.dataset.note}`); }));
   let progressionTimer;
   const playProgression = item => {
     clearInterval(progressionTimer);
     const roots = {C:0,D:2,E:4,F:5,G:7,A:9,B:11};
-    const notes = (item.chords.match(/[A-G]/g) || []).map(note => roots[note]).filter(note => note !== undefined);
+    const notes = item.chords.split(' · ').map(chord => transposeChord(chord, progressionShift).match(/[A-G]/)?.[0]).map(note => roots[note]).filter(note => note !== undefined);
     let position = 0;
     const tick = () => { if (notes.length) playTone(notes[position % notes.length], .55); position += 1; };
     tick(); progressionTimer = setInterval(tick, 60000 / (item.tempo || 92));
@@ -278,8 +321,35 @@
   };
   $('#widgetKey').addEventListener('change', event => { const key=event.target.value; const map={C:'C · E · G',G:'G · B · D',D:'D · F♯ · A',F:'F · A · C'}; $('#chordDots').textContent=map[key]; });
 
-  let progressionShift=0;
-  $('#transposeProgression').addEventListener('click', () => { progressionShift++; const names=['C','D♭','D','E♭','E','F','F♯','G','A♭','A','B♭','B']; $('#progressionKey').textContent=names[progressionShift%12]; toast(`Progression transposed +${progressionShift}`); });
+  let progressionShift = 0;
+  let selectedProgression = progressions[0];
+  const transposeChord = (chord, amount) => {
+    const match = chord.match(/^([A-G])([#♯b♭]?)(.*)$/);
+    if (!match) return chord;
+    const accidental = match[2] === 'b' ? '♭' : match[2] === '#' ? '♯' : match[2];
+    const names = ['C','C♯','D','E♭','E','F','F♯','G','A♭','A','B♭','B'];
+    const normalized = `${match[1]}${accidental}`;
+    let index = names.indexOf(normalized);
+    if (index < 0) {
+      const enharmonic = {'D♭':'C♯','G♭':'F♯','A♯':'B♭','E♯':'F','B♯':'C'}[normalized];
+      index = names.indexOf(enharmonic || match[1]);
+    }
+    if (index < 0) return chord;
+    return `${names[(index + amount + 120) % 12]}${match[3]}`;
+  };
+  const renderProgressionEditor = () => {
+    const source = selectedProgression?.chords || 'C · Am · F · G';
+    const chords = source.split(' · ').map(chord => transposeChord(chord, progressionShift));
+    $('#progressionPattern').textContent = chords.join(' – ');
+    const root = chords[0].replace(/(maj7|m7|m|7)$/,'');
+    $('#progressionKey').textContent = root;
+  };
+  renderProgressionEditor();
+  $('#transposeProgression').addEventListener('click', () => {
+    progressionShift = (progressionShift + 1) % 12;
+    renderProgressionEditor();
+    toast(`Progression transposed +${progressionShift} semitone${progressionShift === 1 ? '' : 's'}`);
+  });
 
   let tempo = 92; let metronomeTimer;
   const setTempo = value => { tempo=Number(value); $('#tempoValue').textContent=tempo; $('#tempoSlider').value=tempo; };

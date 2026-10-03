@@ -8,6 +8,59 @@
     clearTimeout(window.__toastTimer);
     window.__toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
   };
+  const iconPaths = {
+    home:'<path d="m3 10 9-7 9 7v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1Z"/><path d="M9 21v-6h6v6"/>',
+    library:'<rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 4v16M15 4v16"/>',
+    shuffle:'<path d="M3 6h3c4 0 5 8 9 8h6"/><path d="m18 11 3 3-3 3"/><path d="M3 18h3c1.5 0 2.5-.8 3.3-2"/><path d="M15.7 8C16.5 6.8 17.4 6 19 6h2"/><path d="m18 3 3 3-3 3"/>',
+    search:'<circle cx="11" cy="11" r="6.5"/><path d="m16 16 4.5 4.5"/>',
+    sparkle:'<path d="m12 3-1.4 5.6L5 10l5.6 1.4L12 17l1.4-5.6L19 10l-5.6-1.4Z"/><path d="m19 16-.6 2.4L16 19l2.4.6L19 22l.6-2.4L22 19l-2.4-.6Z"/>',
+    tonal:'<circle cx="12" cy="12" r="8.5"/><path d="M6 12h2l1.2-4 3.2 8 1.4-4H18"/>',
+    metronome:'<path d="m6 20 4-16h4l4 16"/><path d="M5 20h14M12 7l5 5M16 4h3"/>',
+    tools:'<path d="m14.5 6.5 3-3a4 4 0 0 0 0 5.7l-8.3 8.3a2.2 2.2 0 1 1-3.1-3.1l8.3-8.3Z"/><path d="m13 8 3 3"/>',
+    folder:'<path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z"/>',
+    playlist:'<path d="M4 6h11M4 11h11M4 16h7"/><path d="M17 13v6l3-1.5"/><circle cx="17" cy="20" r="1.5"/>',
+    practice:'<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/>',
+    community:'<circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2.5"/><path d="M3.5 20a5.5 5.5 0 0 1 11 0M15 16a4.5 4.5 0 0 1 5.5 4"/>',
+    grid:'<rect x="4" y="4" width="6" height="6" rx="1"/><rect x="14" y="4" width="6" height="6" rx="1"/><rect x="4" y="14" width="6" height="6" rx="1"/><rect x="14" y="14" width="6" height="6" rx="1"/>',
+    bolt:'<path d="M13 2 4 14h6l-1 8 9-12h-6Z"/>',
+    play:'<path d="m9 6 9 6-9 6Z" fill="currentColor" stroke="none"/>',
+    pause:'<path d="M8 6v12M16 6v12"/>',
+    previous:'<path d="m17 5-7 7 7 7M7 5v14"/>',
+    next:'<path d="m7 5 7 7-7 7M17 5v14"/>',
+    repeat:'<path d="M4 7h13l-3-3M20 17H7l3 3"/><path d="M17 7a4 4 0 0 1 3 4M7 17a4 4 0 0 1-3-4"/>',
+    sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
+    bell:'<path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',
+    tour:'<circle cx="12" cy="12" r="9"/><path d="m10 8 5 4-5 4Z" fill="currentColor" stroke="none"/>',
+    crown:'<path d="m3 7 4 4 5-7 5 7 4-4-2 12H5Z"/><path d="M5 16h14"/>',
+    clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+    activity:'<path d="M4 16h3l2-8 3 12 2-8h6"/>',
+    piano:'<rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 5v14M12 5v14M16 5v14M6 14h2M10 14h2M14 14h2M18 14h-1"/>',
+    music:'<path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/>',
+    bookmark:'<path d="M6 4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18l-6-4-6 4Z"/>',
+    heart:'<path d="M20.8 8.8c0 5.2-8.8 10.2-8.8 10.2S3.2 14 3.2 8.8A4.8 4.8 0 0 1 12 6.1a4.8 4.8 0 0 1 8.8 2.7Z"/>',
+    more:'<circle cx="5" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none"/>',
+    chevron:'<path d="m9 6 6 6-6 6"/>'
+  };
+  const iconSvg = (name, extra='') => `<svg class="ui-icon ${extra}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconPaths[name] || iconPaths.grid}</svg>`;
+  const viewIcons = {home:'home',library:'library',progressions:'shuffle',finder:'search',assistant:'sparkle',tonal:'tonal',metronome:'metronome',tools:'tools',mylibrary:'folder',playlists:'playlist',practice:'practice',community:'community'};
+  $$('.nav-btn').forEach(button => { const target=button.querySelector('.nav-icon'); if (target) target.innerHTML=iconSvg(viewIcons[button.dataset.view]); });
+  const brandMark = $('.brand-mark'); if (brandMark) brandMark.innerHTML=iconSvg('music');
+  const searchSymbol = $('.search-symbol'); if (searchSymbol) searchSymbol.innerHTML=iconSvg('search');
+  const notificationButton = $('#notificationBtn'); if (notificationButton) notificationButton.innerHTML=`${iconSvg('bell')}<i class="dot"></i>`;
+  const themeButton = $('#themeBtn'); if (themeButton) themeButton.innerHTML=iconSvg('sun');
+  $$('.quick-icon').forEach(target => { const view=target.closest('[data-view]')?.dataset.view; target.innerHTML=iconSvg(view === 'tools' ? 'piano' : viewIcons[view]); });
+  $$('.tool-icon').forEach(target => { const label=target.closest('.tool-card')?.textContent || ''; target.innerHTML=iconSvg(/piano/i.test(label) ? 'piano' : /scale/i.test(label) ? 'grid' : /chord/i.test(label) ? 'library' : 'music'); });
+  $$('.activity-icon').forEach(target => { target.innerHTML=iconSvg(target.textContent.includes('◷') ? 'clock' : target.textContent.includes('♫') ? 'music' : 'bolt'); });
+  $$('.hero-stat i').forEach((target,index) => { target.innerHTML=iconSvg(['music','play','grid','community'][index]); });
+  $$('.section-title i').forEach(target => { target.innerHTML=iconSvg('bolt'); });
+  $$('.panel-head strong').forEach(target => { const label=target.textContent; const name=label.includes('RECENT')?'music':label.includes('SAVED')?'bookmark':label.includes('PIANO')?'piano':label.includes('ACTIVITY')?'activity':label.includes('Now')?'play':'grid'; target.innerHTML=`${iconSvg(name)}<span>${label.replace(/^[^A-Za-z]+/, '').replace(/&nbsp;/g,'').trim()}</span>`; });
+  const heroPrimary = $('.hero-actions .primary'); if (heroPrimary) heroPrimary.innerHTML=`${iconSvg('plus')}<span>Create New Project</span>`;
+  const heroTour = $('#watchTour'); if (heroTour) heroTour.innerHTML=`${iconSvg('tour')}<span>Watch Tour</span>`;
+  $$('.round-arrow').forEach(target => target.innerHTML=iconSvg('chevron'));
+  $$('.heart').forEach(target => target.innerHTML=iconSvg('heart'));
+  $$('.player-controls .control-btn').forEach((target,index) => { target.innerHTML=iconSvg(['shuffle','previous','next','repeat'][index === 0 ? 0 : index === 1 ? 1 : index === 2 ? 2 : 3]); });
+  const playButton = $('#playBtn'); if (playButton) playButton.innerHTML=iconSvg('play');
 
   let songs = [
     {title:'BbY WOW',artist:'Karol G, Judeline & rusowsky',key:'B♭',bpm:104,cover:'cover',chartRank:1,search:'BbY WOW Karol G'},
@@ -39,14 +92,14 @@
   };
   $$('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
 
-  const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${favoriteTitles.has(song.title) ? '♥' : '♡'}</button><button class="more" aria-label="More options">•••</button></div>`;
+  const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">${iconSvg('play')}</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${iconSvg('heart')}</button><button class="more" aria-label="More options">${iconSvg('more')}</button></div>`;
   const renderRecentSongs = () => { $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join(''); };
   renderRecentSongs();
-  const progressionMarkup = item => `<div class="progress-row"><button class="play-small" data-progression="${item.title}">▶</button><div class="progress-meta"><strong>${item.title}</strong><small>${item.chords}</small></div><span class="tag ${item.className}">${item.tag}</span><button class="more">•••</button></div>`;
+  const progressionMarkup = item => `<div class="progress-row"><button class="play-small" data-progression="${item.title}">${iconSvg('play')}</button><div class="progress-meta"><strong>${item.title}</strong><small>${item.chords}</small></div><span class="tag ${item.className}">${item.tag}</span><button class="more">${iconSvg('more')}</button></div>`;
   const renderSavedProgressions = () => { $('#savedProgressions').innerHTML = progressions.map(progressionMarkup).join(''); };
   renderSavedProgressions();
 
-  const libraryMarkup = (song,index) => `<div class="mini-card"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div style="min-width:0;flex:1"><h3>${song.title}</h3><p>${song.artist} · Key ${song.key} · ${song.bpm} BPM</p></div><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${favoriteTitles.has(song.title) ? '♥' : '♡'}</button></div>`;
+  const libraryMarkup = (song,index) => `<div class="mini-card"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">${iconSvg('play')}</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div style="min-width:0;flex:1"><h3>${song.title}</h3><p>${song.artist} · Key ${song.key} · ${song.bpm} BPM</p></div><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${iconSvg('heart')}</button></div>`;
   const renderLibrary = () => {
     const query = ($('#librarySearch')?.value || '').toLowerCase();
     const genre = $('#genreFilter')?.value || 'all';
@@ -58,13 +111,13 @@
   $('#genreFilter').addEventListener('change', renderLibrary);
   const renderMyLibrary = () => {
     const favorites = songs.map((song,index) => ({song,index})).filter(({song}) => favoriteTitles.has(song.title));
-    $('#favoritesList').innerHTML = favorites.length ? favorites.map(({song,index}) => `<button class="feature-button" data-song-play="${index}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">▶</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>♥</span></button>`).join('') : '<div class="not-found">Belum ada favorit. Tekan ♥ pada lagu untuk menyimpannya.</div>';
+    $('#favoritesList').innerHTML = favorites.length ? favorites.map(({song,index}) => `<button class="feature-button" data-song-play="${index}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">${iconSvg('play')}</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>♥</span></button>`).join('') : '<div class="not-found">Belum ada favorit. Tekan ♥ pada lagu untuk menyimpannya.</div>';
     $('#favoriteCount').textContent = favorites.length;
   };
   renderMyLibrary();
 
   const renderProgressionPage = () => {
-    $('#progressionPageList').innerHTML = progressions.map(item => `<div class="feature-button progression-open" data-title="${item.title}"><button class="play-small" data-progression="${item.title}">▶</button><span><strong>${item.title}</strong><small>${item.chords}</small></span><span class="tag ${item.className}">${item.tag}</span></div>`).join('');
+    $('#progressionPageList').innerHTML = progressions.map(item => `<div class="feature-button progression-open" data-title="${item.title}"><button class="play-small" data-progression="${item.title}">${iconSvg('play')}</button><span><strong>${item.title}</strong><small>${item.chords}</small></span><span class="tag ${item.className}">${item.tag}</span></div>`).join('');
   };
   renderProgressionPage();
   document.addEventListener('click', event => {
@@ -84,7 +137,7 @@
       return;
     }
     const favorite = event.target.closest('.heart');
-    if (favorite) { favorite.classList.toggle('off'); favorite.textContent = favorite.classList.contains('off') ? '♡' : '♥'; toast(favorite.classList.contains('off') ? 'Removed from favorites' : 'Added to favorites'); }
+    if (favorite) { favorite.classList.toggle('off'); favorite.innerHTML = iconSvg('heart'); toast(favorite.classList.contains('off') ? 'Removed from favorites' : 'Added to favorites'); }
   });
 
   const waveform = $('#waveform');
@@ -103,7 +156,7 @@
     $('#playerCover').textContent = song.chartRank ? `#${song.chartRank}` : '♫';
     $('#playerTime').textContent = formatTime(audioPreview?.currentTime || playerSeconds);
     $('#playerDuration').textContent = formatTime(audioPreview?.duration || 30);
-    $('#playBtn').textContent = playing ? 'Ⅱ' : '▶';
+    $('#playBtn').innerHTML = iconSvg(playing ? 'pause' : 'play');
     waveform.classList.toggle('playing', playing);
   };
   const fetchPreview = async song => {
@@ -176,7 +229,7 @@
   const finder = query => {
     const q = (query || 'easy music').toLowerCase();
     const results = songs.filter(song => `${song.title} ${song.artist} ${song.key}`.toLowerCase().includes(q) || q.includes('easy') || q.includes('pop'));
-    $('#finderResults').innerHTML = results.slice(0,4).map(song => `<button class="feature-button" data-song-play="${songs.indexOf(song)}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">▶</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>Play ›</span></button>`).join('') || '<div class="not-found">Belum menemukan lagu yang cocok.</div>';
+    $('#finderResults').innerHTML = results.slice(0,4).map(song => `<button class="feature-button" data-song-play="${songs.indexOf(song)}"><span class="cover ${song.cover}" style="width:32px;height:32px;flex-basis:32px">${iconSvg('play')}</span><span><strong>${song.title}</strong><small>${song.artist} · Key ${song.key} · ${song.bpm} BPM</small></span><span>Play ›</span></button>`).join('') || '<div class="not-found">Belum menemukan lagu yang cocok.</div>';
   };
   $('#finderBtn').addEventListener('click', () => finder($('#finderInput').value));
   $$('.finder-chip').forEach(chip => chip.addEventListener('click', () => { $('#finderInput').value=chip.textContent; finder(chip.textContent); }));

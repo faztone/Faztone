@@ -44,6 +44,218 @@
     'Bb Major':['2♭','G Minor']
   };
 
+
+  const songCatalog = {
+    espresso: { id:'espresso', title:'Espresso', artist:'Sabrina Carpenter', key:'B Major', bpm:104, query:'Espresso Sabrina Carpenter', chords:[[59,63,66],[57,61,64],[55,59,62],[52,56,59]] },
+    beautifulThings: { id:'beautifulThings', title:'Beautiful Things', artist:'Benson Boone', key:'B Major', bpm:105, query:'Beautiful Things Benson Boone', chords:[[59,63,66],[57,60,64],[55,59,62],[52,56,59]] },
+    birdsOfAFeather: { id:'birdsOfAFeather', title:'Birds of a Feather', artist:'Billie Eilish', key:'C Major', bpm:105, query:'Birds of a Feather Billie Eilish', chords:[[60,64,67],[57,60,64],[53,57,60],[55,59,62]] },
+    asItWas: { id:'asItWas', title:'As It Was', artist:'Harry Styles', key:'A Major', bpm:174, query:'As It Was Harry Styles', chords:[[57,61,64],[54,57,61],[52,56,59],[55,59,62]] },
+    dieWithASmile: { id:'dieWithASmile', title:'Die With A Smile', artist:'Lady Gaga & Bruno Mars', key:'A Major', bpm:158, query:'Die With A Smile Lady Gaga Bruno Mars', chords:[[57,61,64],[53,57,60],[55,59,62],[52,56,59]] },
+    blindingLights: { id:'blindingLights', title:'Blinding Lights', artist:'The Weeknd', key:'F Minor', bpm:171, query:'Blinding Lights The Weeknd', chords:[[53,56,60],[56,60,63],[51,55,58],[48,52,55]] }
+  };
+  const songAliases = { midnight:'espresso', ocean:'beautifulThings', falling:'birdsOfAFeather', good:'asItWas' };
+  let authClient = null;
+
+  function replaceIcons() {
+    const icons = {
+      '⌂':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10"/><path d="M9 20v-6h6v6"/></svg>',
+      '▥':'<svg class="icon-svg" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 4v16M12 4v16M16 4v16"/></svg>',
+      '⇄':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M7 7h12l-3-3"/><path d="M17 17H5l3 3"/></svg>',
+      '⌕':'<svg class="icon-svg" viewBox="0 0 24 24"><circle cx="10.8" cy="10.8" r="6.3"/><path d="m16 16 5 5"/></svg>',
+      '✦':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="m12 2 1.7 6.3L20 10l-6.3 1.7L12 18l-1.7-6.3L4 10l6.3-1.7Z"/><path d="m19 16 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7Z"/></svg>',
+      '◌':'<svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 5v14M5 12h14"/></svg>',
+      '♩':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M14 4v12.5a3.5 3.5 0 1 1-2-3.1V4l8-2v8"/></svg>',
+      '✣':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4"/></svg>',
+      '▱':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M4 5h16v14H4z"/><path d="M8 5v14M12 5v14M16 5v14"/></svg>',
+      '☷':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M5 6h14M5 12h14M5 18h14"/><circle cx="3" cy="6" r="1"/><circle cx="3" cy="12" r="1"/><circle cx="3" cy="18" r="1"/></svg>',
+      '◷':'<svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>',
+      '♙':'<svg class="icon-svg" viewBox="0 0 24 24"><circle cx="12" cy="7" r="3"/><path d="M6 21c.5-4 2.5-6 6-6s5.5 2 6 6M9 11h6"/></svg>',
+      '♧':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M12 4c-3-4-8 1-5 4 1.4 1.4 3.7 1.2 5 .2 1.3 1 3.6 1.2 5-.2 3-3-2-8-5-4Z"/><path d="M12 8v12M8 20h8"/></svg>',
+      '↕':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M8 4v16M5 7l3-3 3 3M16 20V4m-3 13 3 3 3-3"/></svg>',
+      '♬':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
+      '▦':'<svg class="icon-svg" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg>'
+    };
+    $('.nav-icon,.quick-icon,.tool-icon').forEach(el => { const icon = icons[el.textContent.trim()]; if (icon) el.innerHTML = icon; });
+  }
+
+  function renderChartCards() {
+    const target = $('#finderCards');
+    if (!target) return;
+    target.innerHTML = '';
+    Object.keys(songCatalog).forEach(id => {
+      const song = songCatalog[id];
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'mini-card';
+      card.dataset.song = song.id;
+      card.innerHTML = '<div class="cover">♫</div><div><h3>' + song.title + '</h3><p>' + song.artist + ' · ' + song.key + ' · ' + song.bpm + ' BPM</p><span class="chart-badge">Pop chart preview</span></div>';
+      target.appendChild(card);
+    });
+  }
+
+  function updatePlayer(song, status) {
+    const title = $('#playerTitle'); const label = $('#playerStatus');
+    if (title) title.textContent = song.title + ' · ' + song.artist;
+    if (label) label.textContent = status;
+  }
+
+  function stopPreview() {
+    if (state.previewTimer) { window.clearInterval(state.previewTimer); state.previewTimer = null; }
+  }
+
+  function playSynthPreview(song) {
+    stopPreview();
+    ensureAudio();
+    let step = 0;
+    const playStep = () => {
+      const chord = song.chords[step % song.chords.length];
+      chord.forEach(note => playTone(note, 0.62));
+      step += 1;
+      if (step >= 16) { stopPreview(); updatePlayer(song, 'Preview selesai'); }
+    };
+    playStep();
+    state.previewTimer = window.setInterval(playStep, Math.max(260, Math.round(60000 / song.bpm)));
+    updatePlayer(song, 'Synth chord preview');
+  }
+
+  async function playSongById(id) {
+    const song = songCatalog[songAliases[id] || id];
+    if (!song) return;
+    state.currentSong = song;
+    const audio = $('#songAudio');
+    updatePlayer(song, 'Loading preview…');
+    $('.song-playing').forEach(el => el.classList.remove('song-playing'));
+    const clicked = $('[data-song="' + song.id + '"]');
+    if (clicked) clicked.classList.add('song-playing');
+    if (!audio) { playSynthPreview(song); return; }
+    audio.pause();
+    audio.removeAttribute('src');
+    try {
+      const response = await fetch('https://itunes.apple.com/search?term=' + encodeURIComponent(song.query) + '&entity=song&limit=5');
+      const data = await response.json();
+      const result = (data.results || []).find(item => item.previewUrl);
+      if (!result) throw new Error('No preview');
+      audio.src = result.previewUrl;
+      audio.onended = () => updatePlayer(song, 'Preview selesai');
+      await audio.play();
+      updatePlayer(song, 'Playing 30-second preview');
+      showToast('Preview diputar: ' + song.title);
+    } catch (error) {
+      playSynthPreview(song);
+      showToast('Preview streaming gagal; synth practice dijalankan.');
+    }
+  }
+
+  function setupSongPlayer() {
+    const player = $('#playerPlay');
+    if (player) player.addEventListener('click', () => {
+      const audio = $('#songAudio');
+      if (audio && audio.src && !audio.paused) { audio.pause(); updatePlayer(state.currentSong || songCatalog.espresso, 'Paused'); }
+      else if (state.currentSong) playSongById(state.currentSong.id);
+      else showToast('Pilih lagu dari Recent Songs.');
+    });
+  }
+
+  function estimateMajorKey(buffer) {
+    const data = buffer.getChannelData(0);
+    const sampleRate = buffer.sampleRate;
+    const windowSize = 4096;
+    const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.25));
+    const limit = Math.min(data.length - windowSize, sampleRate * 30);
+    const histogram = new Array(12).fill(0);
+    for (let start = 0; start < limit; start += frameStep) {
+      for (let midi = 36; midi <= 83; midi += 1) {
+        const hz = 440 * Math.pow(2, (midi - 69) / 12);
+        if (hz >= sampleRate / 2) continue;
+        let real = 0; let imag = 0;
+        for (let n = 0; n < windowSize; n += 4) {
+          const value = data[start + n] * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / windowSize));
+          const phase = (2 * Math.PI * hz * n) / sampleRate;
+          real += value * Math.cos(phase);
+          imag -= value * Math.sin(phase);
+        }
+        histogram[midi % 12] += Math.sqrt(real * real + imag * imag);
+      }
+    }
+    const profile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+    let bestRoot = 0; let bestScore = -Infinity;
+    for (let root = 0; root < 12; root += 1) {
+      let score = 0;
+      for (let i = 0; i < 12; i += 1) score += histogram[(root + i) % 12] * profile[i];
+      if (score > bestScore) { bestScore = score; bestRoot = root; }
+    }
+    return noteNames[bestRoot] + ' Major';
+  }
+
+  async function analyzeTonalFile(file) {
+    const status = $('#tonalStatus');
+    if (!file) return;
+    if (status) status.textContent = 'Menganalisis 30 detik pertama audio…';
+    try {
+      if (!ensureAudio()) throw new Error('AudioContext unavailable');
+      const buffer = await state.audio.decodeAudioData(await file.arrayBuffer());
+      const key = estimateMajorKey(buffer);
+      updateTonal(key);
+      if (status) status.textContent = 'Selesai. Kandidat tonal Major: ' + key + '.';
+      showToast('Tonal terdeteksi: ' + key);
+    } catch (error) {
+      if (status) status.textContent = 'Audio tidak bisa dianalisis di browser ini. Coba file WAV/MP3 lain.';
+      showToast('Analisis tonal gagal.');
+    }
+  }
+
+  function setupTonalAnalyzer() {
+    const file = $('#tonalFile'); const analyze = $('#tonalAnalyze'); const preview = $('#tonalPreview');
+    if (!file || !analyze) return;
+    file.addEventListener('change', () => { const selected = file.files && file.files[0]; if (selected && preview) preview.src = URL.createObjectURL(selected); });
+    analyze.addEventListener('click', () => analyzeTonalFile(file.files && file.files[0]));
+  }
+
+  function setAuthSession(session) {
+    state.session = session;
+    const user = session && session.user;
+    const name = user && (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name) || user.email) || 'Faza';
+    const avatar = user && user.user_metadata && user.user_metadata.avatar_url;
+    const top = $('.top-actions .avatar'); const bottom = $('.profile strong'); const message = $('#authMessage');
+    if (top) { top.textContent = user ? name.slice(0,1).toUpperCase() : 'F'; if (avatar) top.style.backgroundImage = 'url(' + avatar + ')'; }
+    if (bottom) bottom.textContent = name;
+    if (message) message.textContent = user ? 'Signed in as ' + name : 'Belum login. Pilih Google untuk masuk.';
+  }
+
+  function setupAuth() {
+    const modal = $('#authModal'); const message = $('#authMessage');
+    const open = () => { if (modal) modal.classList.remove('hidden'); };
+    const close = () => { if (modal) modal.classList.add('hidden'); };
+    $('[data-action="profile"]').forEach(button => button.addEventListener('click', open));
+    const closeButton = $('#closeAuth'); if (closeButton) closeButton.addEventListener('click', close);
+    if (modal) modal.addEventListener('click', event => { if (event.target === modal) close(); });
+    const google = $('#googleLogin'); const logout = $('#logoutButton');
+    if (!window.supabase || !window.supabase.createClient) { if (message) message.textContent = 'Auth service belum termuat. Coba refresh halaman.'; return; }
+    authClient = window.supabase.createClient('https://pyokprmnijoowrpaopyo.supabase.co', 'sb_publishable_3oB-xmqTGDPDYYSLXpGPiw_NdH1R0xC');
+    authClient.auth.getSession().then(result => setAuthSession(result.data.session)).catch(() => {});
+    authClient.auth.onAuthStateChange((event, session) => setAuthSession(session));
+    if (google) google.addEventListener('click', async () => {
+      if (message) message.textContent = 'Membuka Google…';
+      const result = await authClient.auth.signInWithOAuth({ provider:'google', options:{ redirectTo: window.location.origin + window.location.pathname } });
+      if (result.error && message) message.textContent = 'Login gagal: ' + result.error.message;
+    });
+    if (logout) logout.addEventListener('click', async () => { if (authClient) await authClient.auth.signOut(); close(); showToast('Kamu sudah logout.'); });
+  }
+
+  async function persistFavorite(song) {
+    if (!song) { showToast('Pilih lagu dulu.'); return; }
+    try {
+      const saved = JSON.parse(localStorage.getItem('musicspace-favorites') || '[]');
+      if (!saved.some(item => item.id === song.id)) saved.push(song);
+      localStorage.setItem('musicspace-favorites', JSON.stringify(saved));
+    } catch (error) {}
+    if (authClient && state.session && state.session.user) {
+      const result = await authClient.from('favorites').upsert({ user_id:state.session.user.id, song_id:song.id, title:song.title, artist:song.artist, song_key:song.key, bpm:song.bpm }, { onConflict:'user_id,song_id' });
+      if (result.error) showToast('Tersimpan lokal; tabel backend belum siap.');
+      else showToast('Favorite tersimpan ke akun.');
+    } else showToast('Favorite tersimpan di perangkat. Login untuk sinkronisasi.');
+  }
+
   function showToast(message) {
     const el = $('#toast');
     if (!el) return;
@@ -398,9 +610,9 @@
       const chordOpen = event.target.closest('[data-chord-open]');
       if (chordOpen) { showView('pianoVisualizer'); initPiano(); applyChord(chordOpen.dataset.chord); return; }
       const song = event.target.closest('[data-song]');
-      if (song) { const title = $('#playerTitle'); const status = $('#playerStatus'); if (title) title.textContent = song.dataset.song; if (status) status.textContent = 'Playing demo audio'; showToast('Demo ' + song.dataset.song + ' diputar.'); return; }
+      if (song) { playSongById(song.dataset.song); return; }
       const action = event.target.closest('[data-action]');
-      if (action) { const type = action.dataset.action; if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); }
+      if (action) { const type = action.dataset.action; if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); }
     });
     document.addEventListener('keydown', event => {
       if (event.code === 'Space' && state.view === 'pianoVisualizer' && ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) < 0) { event.preventDefault(); if (event.repeat) return; toggleSustain(true); }
@@ -411,10 +623,15 @@
     });
     document.addEventListener('keyup', event => { if (event.code === 'Space') toggleSustain(false); });
     const tonal = $('#tonalSelect'); if (tonal) tonal.addEventListener('change', () => updateTonal(tonal.value));
-    const player = $('#playerPlay'); if (player) player.addEventListener('click', () => showToast('Pilih lagu Recent Songs untuk memulai demo.'));
+
   }
 
+  replaceIcons();
   renderCards();
+  renderChartCards();
+  setupSongPlayer();
+  setupTonalAnalyzer();
+  setupAuth();
   setupMetronome();
   setupTranspose();
   setupAssistant();

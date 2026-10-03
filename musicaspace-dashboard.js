@@ -378,7 +378,6 @@
     const sharp = $('#tonalSharp');
     const minor = $('#relativeMinor');
     const confidenceEl = $('#tonalConfidence');
-    const select = $('#tonalSelect');
     if (result) result.textContent = normalized;
     if (sharp) sharp.textContent = info.signature || '—';
     if (minor) minor.textContent = info.relative || '—';

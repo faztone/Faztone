@@ -24,7 +24,9 @@
     metroBpm: 92,
     lastTap: 0,
     chordCatalog: [],
-    chordCatalogLoaded: false
+    chordCatalogLoaded: false,
+    activeChordId: null,
+    chordTargetKey: null
   };
 
   const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -610,7 +612,7 @@
 
   const routeViews = new Set([
     'home','library','progressions','finder','assistant','tonal','metronome',
-    'tools','pianoVisualizer','mylibrary','playlists','practice','community'
+    'tools','pianoVisualizer','mylibrary','playlists','practice','community','chordDetail'
   ]);
   const routeTitles = {
     home:'Musica Space',
@@ -625,18 +627,29 @@
     mylibrary:'My Library · Musica Space',
     playlists:'Playlists · Musica Space',
     practice:'Practice · Musica Space',
-    community:'Community · Musica Space'
+    community:'Community · Musica Space',
+    chordDetail:'Chord Sheet · Musica Space'
   };
 
   function viewFromLocation() {
     const raw = String(window.location.hash || '').replace(/^#/, '').trim();
-    let view = raw;
-    try { view = decodeURIComponent(raw); } catch (error) {}
-    return routeViews.has(view) ? view : 'home';
+    let decoded = raw;
+    try { decoded = decodeURIComponent(raw); } catch (error) {}
+    if (decoded.indexOf('chords/') === 0) {
+      const id = decoded.slice('chords/'.length).trim();
+      if (id) {
+        state.activeChordId = id;
+        return 'chordDetail';
+      }
+    }
+    state.activeChordId = null;
+    return routeViews.has(decoded) ? decoded : 'home';
   }
 
   function syncViewRoute(view, replace) {
-    const hash = '#' + view;
+    const hash = view === 'chordDetail' && state.activeChordId
+      ? '#chords/' + encodeURIComponent(state.activeChordId)
+      : '#' + view;
     if (window.location.hash === hash) return;
     if (replace) window.history.replaceState(null, '', hash);
     else window.history.pushState(null, '', hash);
@@ -652,7 +665,9 @@
     $$('.view').forEach(section => section.classList.toggle('active', section === target));
     $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     state.view = view;
+    if (routeTitles[view]) document.title = routeTitles[view];
     if (view === 'pianoVisualizer') initPiano();
+    if (view === 'chordDetail') renderChordDetail(state.activeChordId);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -1063,6 +1078,7 @@
       state.chordCatalogLoaded = true;
       const search = $('#chordSearch');
       renderChordCatalog(search ? search.value : '');
+      if (state.view === 'chordDetail') renderChordDetail(state.activeChordId);
     } catch (error) {
       state.chordCatalogLoaded = false;
       const target = $('#chordCards');
@@ -1081,14 +1097,142 @@
     loadChordCatalog();
   }
 
-  function openCatalogSong(id) {
+  const chordRootPitches = {
+    C:0, 'C#':1, Db:1, D:2, 'D#':3, Eb:3, E:4, F:5,
+    'F#':6, Gb:6, G:7, 'G#':8, Ab:8, A:9, 'A#':10, Bb:10, B:11
+  };
+  const chordDisplayRoots = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+  const chordMajorScale = [0,2,4,5,7,9,11];
+  const chordMinorScale = [0,2,3,5,7,8,11];
+  const romanDegrees = { I:0, II:1, III:2, IV:3, V:4, VI:5, VII:6 };
+
+  function rootFromChordSymbol(value) {
+    const match = String(value || '').trim().match(/^([A-G](?:#|b)?)/);
+    return match ? match[1] : '';
+  }
+  function pitchFromKey(value) {
+    const root = rootFromChordSymbol(String(value || '').replace(/\s+major$|\s+minor$/i, ''));
+    return Object.prototype.hasOwnProperty.call(chordRootPitches, root) ? chordRootPitches[root] : 0;
+  }
+  function preferredChordRoot(pitch) {
+    return chordDisplayRoots[((pitch % 12) + 12) % 12];
+  }
+  function transposeChordSymbol(symbol, semitones) {
+    const text = String(symbol || '').trim();
+    const root = rootFromChordSymbol(text);
+    if (!root || !Object.prototype.hasOwnProperty.call(chordRootPitches, root)) return text;
+    const suffix = text.slice(root.length);
+    return preferredChordRoot(chordRootPitches[root] + semitones) + suffix;
+  }
+  function chordTargetOptions(song) {
+    const suffix = song && song.mode === 'minor' ? 'm' : '';
+    return chordDisplayRoots.map(root => root + suffix);
+  }
+  function romanToChord(token, targetRoot, mode) {
+    const text = String(token || '').replace(/[()]/g, '').trim();
+    const match = text.match(/^([b#]*)([ivIV]+)(.*)$/);
+    if (!match) return text;
+    const accidentalText = match[1] || '';
+    const roman = match[2];
+    const suffixText = match[3] || '';
+    const upper = roman.toUpperCase();
+    const degree = romanDegrees[upper];
+    if (typeof degree !== 'number') return text;
+    const scale = mode === 'minor' ? chordMinorScale : chordMajorScale;
+    const accidental = (accidentalText.match(/b/g) || []).length * -1 + (accidentalText.match(/#/g) || []).length;
+    const pitch = pitchFromKey(targetRoot) + scale[degree] + accidental;
+    let suffix = suffixText;
+    if (!suffix) suffix = roman === upper ? '' : 'm';
+    else if (roman !== upper && suffix.indexOf('m') !== 0 && suffix.indexOf('maj') !== 0) suffix = 'm' + suffix;
+    return preferredChordRoot(pitch) + suffix;
+  }
+  function renderChordSections(song, targetKey) {
+    const target = $('#chordSections');
+    if (!target) return;
+    const offset = pitchFromKey(targetKey) - pitchFromKey(song.key);
+    const sections = song.section_patterns && Object.keys(song.section_patterns).length
+      ? song.section_patterns
+      : { main_loop: song.core_progression || [] };
+    target.innerHTML = '';
+    Object.keys(sections).forEach(sectionName => {
+      const sourceChords = Array.isArray(sections[sectionName]) ? sections[sectionName] : [];
+      const chords = sourceChords.map(chord => transposeChordSymbol(chord, offset));
+      const wrapper = document.createElement('article');
+      wrapper.className = 'chord-section';
+      wrapper.innerHTML = '<h3></h3><div class="chord-line"></div><p class="chord-placeholder"></p>';
+      const heading = wrapper.querySelector('h3');
+      const line = wrapper.querySelector('.chord-line');
+      const placeholder = wrapper.querySelector('.chord-placeholder');
+      if (heading) heading.textContent = sectionName.replace(/_/g, ' ');
+      chords.forEach(chord => {
+        const chip = document.createElement('span');
+        chip.className = 'chord-chip';
+        chip.textContent = chord;
+        if (line) line.appendChild(chip);
+      });
+      if (placeholder) placeholder.textContent = 'Lirik belum tersedia di katalog · gunakan progression ini sebagai chord reference.';
+      target.appendChild(wrapper);
+    });
+  }
+  function renderChordDetail(id) {
     const song = state.chordCatalog.find(item => item.id === id);
+    if (!song) {
+      const title = $('#chordDetailTitle');
+      if (title) title.textContent = 'Pilih lagu dari Chord Library';
+      return;
+    }
+    const title = $('#chordDetailTitle');
+    const artist = $('#chordDetailArtist');
+    const original = $('#chordDetailKey');
+    const current = $('#chordDetailCurrentKey');
+    const difficulty = $('#chordDetailDifficulty');
+    const select = $('#chordTransposeKey');
+    const targetKey = state.chordTargetKey || song.key;
+    state.chordTargetKey = targetKey;
+    if (title) title.textContent = song.title;
+    if (artist) artist.textContent = (song.artist || 'Unknown artist') + ' · ' + (song.chart_year || 'Top chart');
+    if (original) original.textContent = 'Original key: ' + song.key + (song.mode === 'minor' ? ' minor' : ' major');
+    if (current) current.textContent = 'Key: ' + targetKey + (song.mode === 'minor' ? ' minor' : ' major');
+    if (difficulty) difficulty.textContent = song.difficulty ? ' · ' + song.difficulty : '';
+    if (select) {
+      const options = chordTargetOptions(song);
+      select.innerHTML = '';
+      options.forEach(option => {
+        const el = document.createElement('option');
+        el.value = option;
+        el.textContent = option + (song.mode === 'minor' ? ' minor' : ' major');
+        el.selected = option === targetKey;
+        select.appendChild(el);
+      });
+    }
+    renderChordSections(song, targetKey);
+    const status = $('#chordTransposeStatus');
+    if (status) status.textContent = targetKey === song.key ? 'Original key' : 'Transposed from ' + song.key;
+  }
+  function moveChordTranspose(step) {
+    const song = state.chordCatalog.find(item => item.id === state.activeChordId);
     if (!song) return;
-    showView('pianoVisualizer');
-    const feedback = $('#pianoFeedback');
-    const progression = Array.isArray(song.core_progression) ? song.core_progression.join(' · ') : 'Progression tersedia';
-    if (feedback) feedback.textContent = song.title + ' · ' + progression;
-    showToast(song.title + ' dibuka di Piano Visualizer.');
+    const options = chordTargetOptions(song);
+    const current = options.indexOf(state.chordTargetKey || song.key);
+    const next = options[(Math.max(0, current) + step + options.length) % options.length];
+    state.chordTargetKey = next;
+    renderChordDetail(song.id);
+  }
+  function setupChordDetail() {
+    const select = $('#chordTransposeKey');
+    if (select) select.addEventListener('change', () => {
+      state.chordTargetKey = select.value;
+      renderChordDetail(state.activeChordId);
+    });
+    const down = $('#chordTransposeDown');
+    if (down) down.addEventListener('click', () => moveChordTranspose(-1));
+    const up = $('#chordTransposeUp');
+    if (up) up.addEventListener('click', () => moveChordTranspose(1));
+  }
+  function openCatalogSong(id) {
+    state.activeChordId = id;
+    state.chordTargetKey = null;
+    showView('chordDetail');
   }
 
   function renderCards() {
@@ -1159,7 +1303,7 @@
       const song = event.target.closest('[data-song]');
       if (song) { playSongById(song.dataset.song); return; }
       const action = event.target.closest('[data-action]');
-      if (action) { const type = action.dataset.action; if (type === 'menu') { const app = document.querySelector('.app'); if (app) app.classList.toggle('menu-open'); return; } if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
+      if (action) { const type = action.dataset.action; if (type === 'menu') { const app = document.querySelector('.app'); if (app) app.classList.toggle('menu-open'); return; } if (type === 'catalogPiano') { showView('pianoVisualizer'); return; } if (type === 'pro') showToast('Pro preview segera hadir.'); if (type === 'notify') showToast('Tidak ada notifikasi baru.'); if (type === 'profile') showToast('Profile Faza · Free plan'); if (type === 'theme') document.body.classList.toggle('bright'); if (type === 'newPlaylist') showToast('Playlist baru siap dibuat.'); if (type === 'randomChord') showToast('Coba Cmaj7 di piano visualizer.'); if (type === 'like') persistFavorite(state.currentSong); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); if (type === 'copyTonal') { const text = ($('#tonalSummary') && $('#tonalSummary').textContent) || 'No tonal result'; if (navigator.clipboard) navigator.clipboard.writeText(text); showToast('Hasil analisis disalin.'); } if (type === 'openTonalPiano') { showView('pianoVisualizer'); showToast('Piano dibuka untuk latihan tonal.'); } if (type === 'resetTonal') resetTonalAnalysis(); }
     });
     document.addEventListener('keydown', event => {
       if (event.code === 'Space' && state.view === 'pianoVisualizer' && ['INPUT','SELECT','TEXTAREA'].indexOf(document.activeElement.tagName) < 0) { event.preventDefault(); if (event.repeat) return; toggleSustain(true); }
@@ -1175,6 +1319,7 @@
   replaceIcons();
   renderCards();
   setupChordLibrary();
+  setupChordDetail();
   renderChartCards();
   setupSongPlayer();
   setupTonalAnalyzer();

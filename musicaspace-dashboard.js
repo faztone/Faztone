@@ -75,7 +75,7 @@
       '♬':'<svg class="icon-svg" viewBox="0 0 24 24"><path d="M9 18V5l10-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="16" cy="16" r="3"/></svg>',
       '▦':'<svg class="icon-svg" viewBox="0 0 24 24"><rect x="4" y="4" width="6" height="6"/><rect x="14" y="4" width="6" height="6"/><rect x="4" y="14" width="6" height="6"/><rect x="14" y="14" width="6" height="6"/></svg>'
     };
-    $('.nav-icon,.quick-icon,.tool-icon').forEach(el => { const icon = icons[el.textContent.trim()]; if (icon) el.innerHTML = icon; });
+    Array.from(document.querySelectorAll('.nav-icon,.quick-icon,.tool-icon')).forEach(el => { const icon = icons[el.textContent.trim()]; if (icon) el.innerHTML = icon; });
   }
 
   function renderChartCards() {
@@ -124,7 +124,7 @@
     state.currentSong = song;
     const audio = $('#songAudio');
     updatePlayer(song, 'Loading preview…');
-    $('.song-playing').forEach(el => el.classList.remove('song-playing'));
+    Array.from(document.querySelectorAll('.song-playing')).forEach(el => el.classList.remove('song-playing'));
     const clicked = $('[data-song="' + song.id + '"]');
     if (clicked) clicked.classList.add('song-playing');
     if (!audio) { playSynthPreview(song); return; }
@@ -226,7 +226,7 @@
     const modal = $('#authModal'); const message = $('#authMessage');
     const open = () => { if (modal) modal.classList.remove('hidden'); };
     const close = () => { if (modal) modal.classList.add('hidden'); };
-    $('[data-action="profile"]').forEach(button => button.addEventListener('click', open));
+    Array.from(document.querySelectorAll('[data-action="profile"]')).forEach(button => button.addEventListener('click', open));
     const closeButton = $('#closeAuth'); if (closeButton) closeButton.addEventListener('click', close);
     if (modal) modal.addEventListener('click', event => { if (event.target === modal) close(); });
     const google = $('#googleLogin'); const logout = $('#logoutButton');

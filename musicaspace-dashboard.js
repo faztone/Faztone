@@ -611,7 +611,7 @@
     if (!target) return;
     const app = document.querySelector('.app');
     if (app) app.classList.remove('menu-open');
-    $('.view').forEach(section => section.classList.toggle('active', section === target));
+    $$('.view').forEach(section => section.classList.toggle('active', section === target));
     $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     state.view = view;
     if (view === 'pianoVisualizer') initPiano();

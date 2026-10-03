@@ -873,14 +873,6 @@
     if (wave) for (let i = 0; i < 52; i += 1) { const bar = document.createElement('i'); bar.style.height = (18 + (i * 17) % 47) + '%'; wave.appendChild(bar); }
   }
 
-  function updateTonal(value) {
-    const data = keyData[value] || ['0♯','A Minor'];
-    const result = $('#tonalResult'); const sharp = $('#tonalSharp'); const minor = $('#relativeMinor');
-    if (result) result.textContent = value;
-    if (sharp) sharp.textContent = data[0];
-    if (minor) minor.textContent = data[1];
-  }
-
   function setupMetronome() {
     const slider = $('#tempoSlider'); const value = $('#tempoValue');
     if (slider) slider.addEventListener('input', () => { state.metroBpm = Number(slider.value); if (value) value.textContent = slider.value; });

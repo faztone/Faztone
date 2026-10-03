@@ -703,7 +703,9 @@
       if (isBlack(midi)) {
         const key = document.createElement('button');
         key.type = 'button'; key.className = 'black-key'; key.dataset.midi = String(midi);
-        key.textContent = noteLabel(midi); key.style.left = ((whiteIndex - 0.34) / whiteCount * 100) + '%';
+        key.textContent = noteLabel(midi);
+        key.style.left = (whiteIndex / whiteCount * 100) + '%';
+        key.style.width = (100 / whiteCount * 0.62) + '%';
         keyboard.appendChild(key);
       } else whiteIndex += 1;
     }

@@ -249,20 +249,45 @@
     return chroma.map(value => value / total);
   }
 
-  function majorProfileScores(chroma) {
-    const profile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+  function profileCorrelation(chroma, root, profile) {
+    const values = profile.map((_, degree) => chroma[(root + degree) % 12]);
+    const valueMean = values.reduce((a,b) => a + b, 0) / 12;
     const profileMean = profile.reduce((a,b) => a + b, 0) / 12;
-    const profileNorm = Math.sqrt(profile.reduce((sum,value) => sum + Math.pow(value - profileMean, 2), 0));
+    let dot = 0;
+    let valueNorm = 0;
+    let profileNorm = 0;
+    for (let i = 0; i < 12; i += 1) {
+      const a = values[i] - valueMean;
+      const b = profile[i] - profileMean;
+      dot += a * b;
+      valueNorm += a * a;
+      profileNorm += b * b;
+    }
+    return dot / ((Math.sqrt(valueNorm) * Math.sqrt(profileNorm)) || 1);
+  }
+
+  function majorProfileScores(chroma) {
+    const krumhansl = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
+    const temperley = [5.0,1.0,3.5,1.0,4.5,4.0,2.0,4.5,1.0,3.5,1.0,2.0];
     const scores = [];
     for (let root = 0; root < 12; root += 1) {
-      const values = profile.map((_, degree) => chroma[(root + degree) % 12]);
-      const mean = values.reduce((a,b) => a + b, 0) / 12;
-      const norm = Math.sqrt(values.reduce((sum,value) => sum + Math.pow(value - mean, 2), 0)) || 1;
-      let dot = 0;
-      for (let degree = 0; degree < 12; degree += 1) dot += (values[degree] - mean) * (profile[degree] - profileMean);
-      scores.push({ root:root, score:dot / (norm * profileNorm) });
+      scores.push({ root:root, score:(profileCorrelation(chroma, root, krumhansl) + profileCorrelation(chroma, root, temperley)) / 2 });
     }
     return scores;
+  }
+
+  function smoothChromaFrames(frames) {
+    return frames.map((_, index) => {
+      const result = new Array(12).fill(0);
+      let count = 0;
+      for (let offset = -2; offset <= 2; offset += 1) {
+        const frame = frames[index + offset];
+        if (!frame) continue;
+        for (let pc = 0; pc < 12; pc += 1) result[pc] += frame[pc];
+        count += 1;
+      }
+      return result.map(value => value / Math.max(1, count));
+    });
   }
 
   function estimateMajorKey(buffer) {
@@ -271,34 +296,49 @@
     const windowSize = 4096;
     const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.7));
     const limit = Math.max(0, Math.min(data.length - windowSize, sampleRate * 75));
-    const histogram = new Array(12).fill(0);
-    const votes = new Array(12).fill(0);
-    let activeFrames = 0;
+    const frames = [];
     for (let start = 0; start < limit; start += frameStep) {
       let rms = 0;
       for (let n = 0; n < windowSize; n += 8) rms += data[start + n] * data[start + n];
       rms = Math.sqrt(rms / (windowSize / 8));
       if (rms < 0.003) continue;
-      const magnitude = frameSpectrum(data, start, windowSize, sampleRate);
-      const chroma = chromaFromSpectrum(magnitude, sampleRate, windowSize);
-      for (let pc = 0; pc < 12; pc += 1) histogram[pc] += chroma[pc];
-      const localScores = majorProfileScores(chroma).sort((a,b) => b.score - a.score);
-      if (localScores[0]) {
-        const localMargin = Math.max(0, localScores[0].score - (localScores[1] ? localScores[1].score : 0));
-        votes[localScores[0].root] += 1 + localMargin * 2;
-      }
-      activeFrames += 1;
+      const spectrum = frameSpectrum(data, start, windowSize, sampleRate);
+      frames.push(chromaFromSpectrum(spectrum, sampleRate, windowSize));
     }
-    if (!activeFrames) return { key:'C Major', confidence:0, signal:false };
-    const normalizedHistogram = histogram.map(value => value / activeFrames);
-    const globalScores = majorProfileScores(normalizedHistogram);
-    const finalScores = globalScores.map(item => ({ root:item.root, score:item.score * 0.7 + (votes[item.root] / activeFrames) * 0.3 }));
-    finalScores.sort((a,b) => b.score - a.score);
+    if (frames.length < 3) return { key:'C Major', confidence:0, signal:false, candidates:[] };
+    const smoothed = smoothChromaFrames(frames);
+    const global = new Array(12).fill(0);
+    smoothed.forEach(frame => frame.forEach((value, pc) => { global[pc] += value; }));
+    for (let pc = 0; pc < 12; pc += 1) global[pc] /= smoothed.length;
+    const segmentVotes = new Array(12).fill(0);
+    const segmentSize = Math.max(1, Math.floor(smoothed.length / 8));
+    for (let start = 0; start < smoothed.length; start += segmentSize) {
+      const segment = new Array(12).fill(0);
+      let count = 0;
+      for (let index = start; index < Math.min(smoothed.length, start + segmentSize); index += 1) {
+        for (let pc = 0; pc < 12; pc += 1) segment[pc] += smoothed[index][pc];
+        count += 1;
+      }
+      if (!count) continue;
+      for (let pc = 0; pc < 12; pc += 1) segment[pc] /= count;
+      const local = majorProfileScores(segment).sort((a,b) => b.score - a.score);
+      if (local[0]) segmentVotes[local[0].root] += 1 + Math.max(0, local[0].score - (local[1] ? local[1].score : 0)) * 3;
+    }
+    const globalScores = majorProfileScores(global);
+    const finalScores = globalScores.map(item => ({
+      root:item.root,
+      score:item.score * 0.62 + (segmentVotes[item.root] / Math.max(1, smoothed.length / segmentSize)) * 0.38
+    })).sort((a,b) => b.score - a.score);
+    const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
     const best = finalScores[0];
     const second = finalScores[1] || { score:0 };
-    const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-    const confidence = Math.max(0, Math.min(99, Math.round(50 + (best.score - second.score) * 280)));
-    return { key:names[best.root] + ' Major', confidence:confidence, signal:true };
+    const margin = Math.max(0, best.score - second.score);
+    const confidence = Math.max(0, Math.min(99, Math.round(50 + margin * 300)));
+    const candidates = finalScores.slice(0, 3).map(item => ({
+      key:names[item.root] + ' Major',
+      confidence:Math.max(0, Math.min(99, Math.round(50 + Math.max(0, item.score - (finalScores[1] ? finalScores[1].score : 0)) * 220)))
+    }));
+    return { key:names[best.root] + ' Major', confidence:confidence, signal:true, candidates:candidates };
   }
 
   function detectTempoBpm(buffer) {
@@ -313,8 +353,7 @@
       const magnitude = frameSpectrum(data, start, frameSize, sampleRate);
       let flux = 0;
       if (previous) {
-        const upper = Math.min(magnitude.length, 700);
-        for (let bin = 2; bin < upper; bin += 1) flux += Math.max(0, magnitude[bin] - previous[bin]);
+        for (let bin = 2; bin < Math.min(magnitude.length, 900); bin += 1) flux += Math.max(0, magnitude[bin] - previous[bin]);
       }
       envelope.push(flux);
       previous = magnitude;
@@ -323,15 +362,23 @@
     const centered = envelope.map(value => Math.max(0, value - mean));
     const envelopeRate = sampleRate / hop;
     const candidates = [];
+    const segmentLength = Math.max(1, Math.floor(centered.length / 4));
     for (let bpm = 70; bpm <= 180; bpm += 1) {
       const lag = Math.max(1, Math.round((60 / bpm) * envelopeRate));
-      let primary = 0;
-      let double = 0;
-      let triple = 0;
-      for (let i = lag; i < centered.length; i += 1) primary += centered[i] * centered[i - lag];
-      for (let i = lag * 2; i < centered.length; i += 1) double += centered[i] * centered[i - lag * 2];
-      for (let i = lag * 3; i < centered.length; i += 1) triple += centered[i] * centered[i - lag * 3];
-      candidates.push({ bpm:bpm, score:primary + double * 0.18 + triple * 0.08 });
+      const segmentScores = [];
+      for (let segment = 0; segment < 4; segment += 1) {
+        const from = segment * segmentLength;
+        const to = Math.min(centered.length, from + segmentLength);
+        let primary = 0;
+        let energy = 0;
+        for (let i = from; i < to; i += 1) {
+          energy += centered[i] * centered[i];
+          if (i - lag >= from) primary += centered[i] * centered[i - lag];
+        }
+        segmentScores.push(energy ? primary / energy : 0);
+      }
+      const score = segmentScores.reduce((a,b) => a + b, 0) / segmentScores.length;
+      candidates.push({ bpm:bpm, score:score });
     }
     candidates.sort((a,b) => b.score - a.score);
     const best = candidates[0];
@@ -369,20 +416,22 @@
     summary.textContent = parts.join(' · ');
   }
 
-  function updateTonal(value, confidence) {
+  function updateTonal(value, confidence, candidates) {
     const normalized = String(value || 'C Major').replace(/\s+/g, ' ').trim();
     const info = keyInfo(normalized);
     state.detectedKey = normalized;
     state.keyConfidence = typeof confidence === 'number' ? confidence : null;
+    state.detectedCandidates = candidates || [];
     const result = $('#tonalResult');
     const sharp = $('#tonalSharp');
     const minor = $('#relativeMinor');
     const confidenceEl = $('#tonalConfidence');
+    const candidatesEl = $('#tonalCandidates');
     if (result) result.textContent = normalized;
     if (sharp) sharp.textContent = info.signature || '—';
     if (minor) minor.textContent = info.relative || '—';
     if (confidenceEl) confidenceEl.textContent = 'Key confidence: ' + (typeof confidence === 'number' ? confidence + '%' : '—');
-    if (select && Array.from(select.options || []).some(option => option.value === normalized)) select.value = normalized;
+    if (candidatesEl) candidatesEl.textContent = 'Top candidates: ' + (state.detectedCandidates.length ? state.detectedCandidates.map(item => item.key + ' ' + item.confidence + '%').join(' · ') : '—');
     renderTonalSummary();
   }
 
@@ -411,7 +460,7 @@
       const buffer = await decodeTonalFile(file);
       const result = estimateMajorKey(buffer);
       const tempo = detectTempoBpm(buffer);
-      updateTonal(result.key, result.confidence);
+      updateTonal(result.key, result.confidence, result.candidates);
       updateTempo(tempo.bpm, tempo.confidence);
       if (status) status.textContent = result.signal ? 'Analisis selesai. Kandidat Major ditemukan.' : 'Sinyal musik terlalu lemah untuk dipastikan.';
       showToast('Tonal ' + result.key + ' · ' + (tempo.bpm || '—') + ' BPM');
@@ -461,11 +510,13 @@
     const sharp = $('#tonalSharp');
     const minor = $('#relativeMinor');
     const confidence = $('#tonalConfidence');
+    const candidates = $('#tonalCandidates');
     const tempo = $('#tonalTempo');
     if (result) result.textContent = '—';
     if (sharp) sharp.textContent = '—';
     if (minor) minor.textContent = '—';
     if (confidence) confidence.textContent = 'Key confidence: —';
+    if (candidates) candidates.textContent = 'Top candidates: —';
     if (tempo) tempo.textContent = '— BPM';
     const status = $('#tonalStatus');
     if (status) status.textContent = 'Belum ada audio. Pilih file untuk mulai analisis.';

@@ -324,12 +324,12 @@
       gain.gain.exponentialRampToValueAtTime(.22,now+.015);
       source.connect(gain).connect(pianoBus);
       let voice=null;
+      const naturalRelease=Math.max(1.8,duration);
       if (sustainEnabled) {
         voice={released:false,release:()=>{if(voice.released)return;voice.released=true;const releaseAt=audioContext.currentTime;gain.gain.cancelScheduledValues(releaseAt);gain.gain.setValueAtTime(Math.max(.0001,gain.gain.value),releaseAt);gain.gain.exponentialRampToValueAtTime(.0001,releaseAt+.28);try{source.stop(releaseAt+.3);}catch(error){}activePianoVoices.delete(voice);}};
         activePianoVoices.add(voice);
         source.onended=()=>activePianoVoices.delete(voice);
       } else {
-        const naturalRelease=Math.max(1.8,duration);
         gain.gain.exponentialRampToValueAtTime(.0001,now+naturalRelease);
       }
       source.start(now);

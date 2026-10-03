@@ -90,7 +90,20 @@
     $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
     window.scrollTo({top:0, behavior:'smooth'});
   };
-  $$('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
+  $('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
+  // Keep Tools navigation independent from optional audio initialization.
+  $('.tool-launch').forEach(button=>button.addEventListener('click',()=>{
+    if(button.dataset.tool==='Piano Visualizer'){
+      showView('pianoVisualizer');
+      $('#pianoVisualizerView')?.scrollIntoView({behavior:'smooth',block:'start'});
+      toast('Piano Visualizer opened');
+      return;
+    }
+    showView('tools');
+    $('#toolPanelTitle').textContent=button.dataset.tool;
+    $('#toolPanelText').textContent=button.dataset.tool+' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';
+    toast(button.dataset.tool+' opened');
+  }));
 
   const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">${iconSvg('play')}</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart ${favoriteTitles.has(song.title) ? '' : 'off'}" data-favorite="${index}" aria-label="Favorite ${song.title}">${iconSvg('heart')}</button><button class="more" aria-label="More options">${iconSvg('more')}</button></div>`;
   const renderRecentSongs = () => { $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join(''); };
@@ -503,7 +516,6 @@
   };
   const computerNoteMap={z:48,s:49,x:50,d:51,c:52,v:53,g:54,b:55,h:56,n:57,j:58,m:59,q:60,'2':61,w:62,'3':63,e:64,r:65,'5':66,t:67,'6':68,y:69,'7':70,u:71,i:72};
   const openPianoVisualizer=()=>{showView('pianoVisualizer');renderPracticeKeyboard();pianoVisualizerPanel?.scrollIntoView({behavior:'smooth',block:'start'});if(visualizerLastNote)visualizerLastNote.textContent='Ready to play · C3–C6';};
-  $$('.tool-launch').forEach(button=>button.addEventListener('click',()=>{if(button.dataset.tool==='Piano Visualizer'){openPianoVisualizer();toast('Piano Visualizer opened');return;}showView('tools');$('#toolPanelTitle').textContent=button.dataset.tool;$('#toolPanelText').textContent=button.dataset.tool+' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';toast(button.dataset.tool+' opened');}));
   $('#backToTools')?.addEventListener('click',()=>showView('tools'));
   $('#pianoSongStart')?.addEventListener('click',startSongPractice);
   $('#pianoSongStop')?.addEventListener('click',()=>stopSongPractice('Practice stopped.'));

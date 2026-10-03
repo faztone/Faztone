@@ -262,48 +262,76 @@
   const miniNotes = ['C','D','E','F','G','A','B','C'];
   miniPiano.innerHTML = miniNotes.map((note,index) => `<button class="white" data-note="${note}" data-index="${[0,2,4,5,7,9,11,12][index]}" aria-label="${note}"></button>`).join('') + '<button class="black" style="left:12.5%" data-note="C#" data-index="1"></button><button class="black" style="left:25%" data-note="D#" data-index="3"></button><button class="black" style="left:50%" data-note="F#" data-index="6"></button><button class="black" style="left:62.5%" data-note="G#" data-index="8"></button><button class="black" style="left:75%" data-note="A#" data-index="10"></button>';
   let audioContext;
+  let pianoBus;
+  let sustainEnabled = false;
+  const activePianoVoices = new Set();
   const pianoBuffers = {};
   const pianoLoads = {};
   const pianoSampleNotes = [
-    {name:'C2', midi:36},
-    {name:'C3', midi:48},
-    {name:'C4', midi:60},
-    {name:'C5', midi:72},
-    {name:'C6', midi:84}
+    {name:'C2',midi:36},{name:'Ds2',midi:39},{name:'Fs2',midi:42},{name:'A2',midi:45},
+    {name:'C3',midi:48},{name:'Ds3',midi:51},{name:'Fs3',midi:54},{name:'A3',midi:57},
+    {name:'C4',midi:60},{name:'Ds4',midi:63},{name:'Fs4',midi:66},{name:'A4',midi:69},
+    {name:'C5',midi:72},{name:'Ds5',midi:75},{name:'Fs5',midi:78},{name:'A5',midi:81},
+    {name:'C6',midi:84},{name:'Ds6',midi:87},{name:'Fs6',midi:90},{name:'A6',midi:93}
   ];
+  const setSustain = enabled => {
+    sustainEnabled = Boolean(enabled);
+    const button = $('#sustainToggle');
+    if (button) { button.classList.toggle('on',sustainEnabled); button.setAttribute('aria-pressed',String(sustainEnabled)); button.textContent=sustainEnabled?'♧ Sustain: On':'♧ Sustain: Off'; }
+    if (!sustainEnabled) activePianoVoices.forEach(voice => voice.release());
+  };
+  $('#sustainToggle')?.addEventListener('click',()=>setSustain(!sustainEnabled));
   const loadPianoSample = async sample => {
     if (pianoBuffers[sample.name]) return pianoBuffers[sample.name];
     if (!pianoLoads[sample.name]) {
-      pianoLoads[sample.name] = fetch(`https://tonejs.github.io/audio/salamander/${sample.name}.mp3`)
+      pianoLoads[sample.name] = fetch('https://tonejs.github.io/audio/salamander/'+sample.name+'.mp3')
         .then(response => { if (!response.ok) throw new Error('Piano sample unavailable'); return response.arrayBuffer(); })
         .then(data => audioContext.decodeAudioData(data))
-        .then(buffer => { pianoBuffers[sample.name] = buffer; return buffer; });
+        .then(buffer => { pianoBuffers[sample.name]=buffer; return buffer; });
     }
     return pianoLoads[sample.name];
   };
-  const playTone = async (noteIndex, duration=.9) => {
-    const Ctor = window.AudioContext || window.webkitAudioContext;
+  const ensurePianoOutput = () => {
+    if (pianoBus) return;
+    pianoBus=audioContext.createDynamicsCompressor();
+    pianoBus.threshold.value=-18;
+    pianoBus.knee.value=18;
+    pianoBus.ratio.value=4;
+    pianoBus.attack.value=.003;
+    pianoBus.release.value=.24;
+    pianoBus.connect(audioContext.destination);
+  };
+  const playTone = async (noteIndex,duration=.9) => {
+    const Ctor=window.AudioContext||window.webkitAudioContext;
     if (!Ctor) { if ($('#pianoStatus')) $('#pianoStatus').textContent='Browser audio is not supported'; return; }
     audioContext ||= new Ctor();
-    if (audioContext.state === 'suspended') await audioContext.resume();
-    const midi = 60 + Number(noteIndex || 0);
-    const sample = pianoSampleNotes.reduce((nearest,current) => Math.abs(current.midi-midi) < Math.abs(nearest.midi-midi) ? current : nearest, pianoSampleNotes[0]);
+    ensurePianoOutput();
+    if (audioContext.state==='suspended') await audioContext.resume();
+    const midi=60+Number(noteIndex||0);
+    const sample=pianoSampleNotes.reduce((nearest,current)=>Math.abs(current.midi-midi)<Math.abs(nearest.midi-midi)?current:nearest,pianoSampleNotes[0]);
     try {
-      const buffer = await loadPianoSample(sample);
-      const source = audioContext.createBufferSource();
-      const gain = audioContext.createGain();
-      const now = audioContext.currentTime;
-      source.buffer = buffer;
-      source.playbackRate.value = Math.pow(2, (midi - sample.midi) / 12);
-      gain.gain.setValueAtTime(.0001, now);
-      gain.gain.exponentialRampToValueAtTime(.32, now + .015);
-      gain.gain.exponentialRampToValueAtTime(.0001, now + duration);
-      source.connect(gain).connect(audioContext.destination);
+      const buffer=await loadPianoSample(sample);
+      const source=audioContext.createBufferSource();
+      const gain=audioContext.createGain();
+      const now=audioContext.currentTime;
+      source.buffer=buffer;
+      source.playbackRate.value=Math.pow(2,(midi-sample.midi)/12);
+      gain.gain.setValueAtTime(.0001,now);
+      gain.gain.exponentialRampToValueAtTime(.22,now+.015);
+      source.connect(gain).connect(pianoBus);
+      let voice=null;
+      if (sustainEnabled) {
+        voice={released:false,release:()=>{if(voice.released)return;voice.released=true;const releaseAt=audioContext.currentTime;gain.gain.cancelScheduledValues(releaseAt);gain.gain.setValueAtTime(Math.max(.0001,gain.gain.value),releaseAt);gain.gain.exponentialRampToValueAtTime(.0001,releaseAt+.28);try{source.stop(releaseAt+.3);}catch(error){}activePianoVoices.delete(voice);}};
+        activePianoVoices.add(voice);
+        source.onended=()=>activePianoVoices.delete(voice);
+      } else {
+        gain.gain.exponentialRampToValueAtTime(.0001,now+duration);
+      }
       source.start(now);
-      source.stop(now + Math.min(buffer.duration / source.playbackRate.value, duration + 1.2));
-      if ($('#pianoStatus')) $('#pianoStatus').textContent = 'Real piano sample · ready';
+      if (!sustainEnabled) source.stop(now+Math.min(buffer.duration/source.playbackRate.value,duration+1.2));
+      if ($('#pianoStatus')) $('#pianoStatus').textContent='HQ piano sample · '+sample.name+(sustainEnabled?' · sustain on':'');
     } catch (error) {
-      if ($('#pianoStatus')) $('#pianoStatus').textContent = 'Piano sample gagal dimuat';
+      if ($('#pianoStatus')) $('#pianoStatus').textContent='Piano sample gagal dimuat';
       toast('Piano sample gagal dimuat');
     }
   };
@@ -436,7 +464,7 @@
   $('#pianoSongStop')?.addEventListener('click',()=>stopSongPractice('Practice stopped.'));
   $('#pianoSongDemo')?.addEventListener('click',demoPracticeSong);
   visualizerKeyboard?.addEventListener('pointerdown',event=>{const key=event.target.closest('[data-midi]');if(key){event.preventDefault();triggerPianoKey(key);}});
-  window.addEventListener('keydown',event=>{if(event.repeat||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const midi=computerNoteMap[event.key.toLowerCase()];if(midi===undefined)return;const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');if(key){event.preventDefault();triggerPianoKey(key);}});
+  window.addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)setSustain(!sustainEnabled);return;}if(event.repeat||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const midi=computerNoteMap[event.key.toLowerCase()];if(midi===undefined)return;const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');if(key){event.preventDefault();triggerPianoKey(key);}});
   renderPracticeKeyboard();
 
   const tonalInput = $('#tonalAudio');

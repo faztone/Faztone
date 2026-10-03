@@ -163,97 +163,161 @@
     });
   }
 
-  function spectralMagnitude(data, start, windowSize, sampleRate, hz) {
-    let real = 0;
-    let imag = 0;
-    const stride = 4;
-    for (let n = 0; n < windowSize; n += stride) {
-      const value = data[start + n] * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / windowSize));
-      const phase = (2 * Math.PI * hz * n) / sampleRate;
-      real += value * Math.cos(phase);
-      imag -= value * Math.sin(phase);
-    }
-    return Math.sqrt(real * real + imag * imag) / (windowSize / stride);
-  }
-
-  function spectralMagnitude(data, start, windowSize, sampleRate, hz) {
-    let real = 0;
-    let imag = 0;
-    const stride = 4;
-    for (let n = 0; n < windowSize; n += stride) {
-      const value = data[start + n] * (0.5 - 0.5 * Math.cos((2 * Math.PI * n) / windowSize));
-      const phase = (2 * Math.PI * hz * n) / sampleRate;
-      real += value * Math.cos(phase);
-      imag -= value * Math.sin(phase);
-    }
-    return Math.sqrt(real * real + imag * imag) / (windowSize / stride);
-  }
-
-  function estimateMajorKey(buffer) {
-    const data = buffer.getChannelData(0);
-    const sampleRate = buffer.sampleRate;
-    const windowSize = 4096;
-    const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.35));
-    const limit = Math.max(0, Math.min(data.length - windowSize, sampleRate * 60));
-    const histogram = new Array(12).fill(0);
-    let activeFrames = 0;
-    for (let start = 0; start < limit; start += frameStep) {
-      let rms = 0;
-      for (let n = 0; n < windowSize; n += 8) rms += data[start + n] * data[start + n];
-      rms = Math.sqrt(rms / (windowSize / 8));
-      if (rms < 0.003) continue;
-      const chroma = new Array(12).fill(0);
-      for (let midi = 48; midi <= 84; midi += 1) {
-        const hz = 440 * Math.pow(2, (midi - 69) / 12);
-        if (hz >= sampleRate / 2) continue;
-        const f0 = spectralMagnitude(data, start, windowSize, sampleRate, hz);
-        const f1 = hz * 2 < sampleRate / 2 ? spectralMagnitude(data, start, windowSize, sampleRate, hz * 2) : 0;
-        const f2 = hz * 3 < sampleRate / 2 ? spectralMagnitude(data, start, windowSize, sampleRate, hz * 3) : 0;
-        chroma[midi % 12] += Math.log1p(f0 + f1 * 0.45 + f2 * 0.2);
+  function fft(real, imag) {
+    const size = real.length;
+    let j = 0;
+    for (let i = 1; i < size; i += 1) {
+      let bit = size >> 1;
+      while (j & bit) { j ^= bit; bit >>= 1; }
+      j ^= bit;
+      if (i < j) {
+        const realValue = real[i]; real[i] = real[j]; real[j] = realValue;
+        const imagValue = imag[i]; imag[i] = imag[j]; imag[j] = imagValue;
       }
-      const total = chroma.reduce((sum, value) => sum + value, 0);
-      if (!total) continue;
-      for (let pc = 0; pc < 12; pc += 1) histogram[pc] += chroma[pc] / total;
-      activeFrames += 1;
     }
-    if (!activeFrames) return { key:'C Major', confidence:0, signal:false };
+    for (let length = 2; length <= size; length <<= 1) {
+      const angle = -2 * Math.PI / length;
+      const wReal = Math.cos(angle);
+      const wImag = Math.sin(angle);
+      for (let offset = 0; offset < size; offset += length) {
+        let currentReal = 1;
+        let currentImag = 0;
+        const half = length >> 1;
+        for (let i = 0; i < half; i += 1) {
+          const even = offset + i;
+          const odd = even + half;
+          const oddReal = real[odd] * currentReal - imag[odd] * currentImag;
+          const oddImag = real[odd] * currentImag + imag[odd] * currentReal;
+          const evenReal = real[even];
+          const evenImag = imag[even];
+          real[even] = evenReal + oddReal;
+          imag[even] = evenImag + oddImag;
+          real[odd] = evenReal - oddReal;
+          imag[odd] = evenImag - oddImag;
+          const nextReal = currentReal * wReal - currentImag * wImag;
+          currentImag = currentReal * wImag + currentImag * wReal;
+          currentReal = nextReal;
+        }
+      }
+    }
+  }
+
+  function frameSpectrum(data, start, size, sampleRate) {
+    const real = new Float64Array(size);
+    const imag = new Float64Array(size);
+    for (let n = 0; n < size; n += 1) {
+      const sample = data[start + n] || 0;
+      const window = 0.5 - 0.5 * Math.cos((2 * Math.PI * n) / size);
+      real[n] = sample * window;
+    }
+    fft(real, imag);
+    const magnitude = new Float64Array(size / 2);
+    for (let k = 0; k < size / 2; k += 1) magnitude[k] = Math.hypot(real[k], imag[k]) / size;
+    return magnitude;
+  }
+
+  function spectrumAt(magnitude, frequency, sampleRate, size) {
+    const index = frequency * size / sampleRate;
+    if (index < 1 || index >= magnitude.length - 1) return 0;
+    const left = Math.floor(index);
+    const fraction = index - left;
+    return magnitude[left] * (1 - fraction) + magnitude[left + 1] * fraction;
+  }
+
+  function chromaFromSpectrum(magnitude, sampleRate, size) {
+    const direct = new Array(12).fill(0);
+    const harmonic = new Array(12).fill(0);
+    for (let bin = 2; bin < magnitude.length; bin += 1) {
+      const frequency = bin * sampleRate / size;
+      if (frequency < 55 || frequency > 2400) continue;
+      const midi = 69 + 12 * Math.log2(frequency / 440);
+      const nearest = Math.round(midi);
+      const cents = Math.abs(midi - nearest);
+      const tuningWeight = Math.exp(-Math.pow(cents / 0.42, 2));
+      direct[((nearest % 12) + 12) % 12] += Math.log1p(magnitude[bin]) * tuningWeight;
+    }
+    for (let midi = 36; midi <= 84; midi += 1) {
+      const frequency = 440 * Math.pow(2, (midi - 69) / 12);
+      const f0 = spectrumAt(magnitude, frequency, sampleRate, size);
+      const f1 = spectrumAt(magnitude, frequency * 2, sampleRate, size);
+      const f2 = spectrumAt(magnitude, frequency * 3, sampleRate, size);
+      harmonic[midi % 12] += Math.log1p(f0 + f1 * 0.5 + f2 * 0.25);
+    }
+    const chroma = new Array(12).fill(0);
+    for (let pc = 0; pc < 12; pc += 1) chroma[pc] = direct[pc] * 0.55 + harmonic[pc] * 0.45;
+    const total = chroma.reduce((sum, value) => sum + value, 0) || 1;
+    return chroma.map(value => value / total);
+  }
+
+  function majorProfileScores(chroma) {
     const profile = [6.35,2.23,3.48,2.33,4.38,4.09,2.52,5.19,2.39,3.66,2.29,2.88];
     const profileMean = profile.reduce((a,b) => a + b, 0) / 12;
     const profileNorm = Math.sqrt(profile.reduce((sum,value) => sum + Math.pow(value - profileMean, 2), 0));
     const scores = [];
     for (let root = 0; root < 12; root += 1) {
-      const values = profile.map((_, degree) => histogram[(root + degree) % 12]);
+      const values = profile.map((_, degree) => chroma[(root + degree) % 12]);
       const mean = values.reduce((a,b) => a + b, 0) / 12;
       const norm = Math.sqrt(values.reduce((sum,value) => sum + Math.pow(value - mean, 2), 0)) || 1;
       let dot = 0;
       for (let degree = 0; degree < 12; degree += 1) dot += (values[degree] - mean) * (profile[degree] - profileMean);
       scores.push({ root:root, score:dot / (norm * profileNorm) });
     }
-    scores.sort((a,b) => b.score - a.score);
-    const best = scores[0];
-    const second = scores[1] || { score:0 };
+    return scores;
+  }
+
+  function estimateMajorKey(buffer) {
+    const data = buffer.getChannelData(0);
+    const sampleRate = buffer.sampleRate;
+    const windowSize = 4096;
+    const frameStep = Math.max(windowSize, Math.floor(sampleRate * 0.7));
+    const limit = Math.max(0, Math.min(data.length - windowSize, sampleRate * 75));
+    const histogram = new Array(12).fill(0);
+    const votes = new Array(12).fill(0);
+    let activeFrames = 0;
+    for (let start = 0; start < limit; start += frameStep) {
+      let rms = 0;
+      for (let n = 0; n < windowSize; n += 8) rms += data[start + n] * data[start + n];
+      rms = Math.sqrt(rms / (windowSize / 8));
+      if (rms < 0.003) continue;
+      const magnitude = frameSpectrum(data, start, windowSize, sampleRate);
+      const chroma = chromaFromSpectrum(magnitude, sampleRate, windowSize);
+      for (let pc = 0; pc < 12; pc += 1) histogram[pc] += chroma[pc];
+      const localScores = majorProfileScores(chroma).sort((a,b) => b.score - a.score);
+      if (localScores[0]) {
+        const localMargin = Math.max(0, localScores[0].score - (localScores[1] ? localScores[1].score : 0));
+        votes[localScores[0].root] += 1 + localMargin * 2;
+      }
+      activeFrames += 1;
+    }
+    if (!activeFrames) return { key:'C Major', confidence:0, signal:false };
+    const normalizedHistogram = histogram.map(value => value / activeFrames);
+    const globalScores = majorProfileScores(normalizedHistogram);
+    const finalScores = globalScores.map(item => ({ root:item.root, score:item.score * 0.7 + (votes[item.root] / activeFrames) * 0.3 }));
+    finalScores.sort((a,b) => b.score - a.score);
+    const best = finalScores[0];
+    const second = finalScores[1] || { score:0 };
     const names = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
-    const confidence = Math.max(0, Math.min(99, Math.round(50 + (best.score - second.score) * 300)));
+    const confidence = Math.max(0, Math.min(99, Math.round(50 + (best.score - second.score) * 280)));
     return { key:names[best.root] + ' Major', confidence:confidence, signal:true };
   }
 
   function detectTempoBpm(buffer) {
     const data = buffer.getChannelData(0);
     const sampleRate = buffer.sampleRate;
-    const frameSize = 1024;
+    const frameSize = 2048;
     const hop = 512;
     const envelope = [];
     const limit = Math.min(data.length - frameSize, sampleRate * 90);
-    let previousRms = 0;
+    let previous = null;
     for (let start = 0; start < limit; start += hop) {
-      let energy = 0;
-      for (let n = 0; n < frameSize; n += 4) {
-        const value = data[start + n];
-        energy += value * value;
+      const magnitude = frameSpectrum(data, start, frameSize, sampleRate);
+      let flux = 0;
+      if (previous) {
+        const upper = Math.min(magnitude.length, 700);
+        for (let bin = 2; bin < upper; bin += 1) flux += Math.max(0, magnitude[bin] - previous[bin]);
       }
-      const rms = Math.sqrt(energy / (frameSize / 4));
-      envelope.push(Math.max(0, rms - previousRms));
-      previousRms = previousRms * 0.82 + rms * 0.18;
+      envelope.push(flux);
+      previous = magnitude;
     }
     const mean = envelope.reduce((a,b) => a + b, 0) / Math.max(1, envelope.length);
     const centered = envelope.map(value => Math.max(0, value - mean));
@@ -263,19 +327,18 @@
       const lag = Math.max(1, Math.round((60 / bpm) * envelopeRate));
       let primary = 0;
       let double = 0;
-      let half = 0;
+      let triple = 0;
       for (let i = lag; i < centered.length; i += 1) primary += centered[i] * centered[i - lag];
       for (let i = lag * 2; i < centered.length; i += 1) double += centered[i] * centered[i - lag * 2];
-      const halfLag = Math.max(1, Math.round(lag / 2));
-      for (let i = halfLag; i < centered.length; i += 1) half += centered[i] * centered[i - halfLag];
-      candidates.push({ bpm:bpm, score:primary + double * 0.35 + half * 0.15 });
+      for (let i = lag * 3; i < centered.length; i += 1) triple += centered[i] * centered[i - lag * 3];
+      candidates.push({ bpm:bpm, score:primary + double * 0.18 + triple * 0.08 });
     }
     candidates.sort((a,b) => b.score - a.score);
     const best = candidates[0];
     const second = candidates[1] || { score:0 };
     if (!best || best.score <= 0) return { bpm:null, confidence:0 };
     const difference = best.score ? (best.score - second.score) / best.score : 0;
-    return { bpm:best.bpm, confidence:Math.max(0, Math.min(99, Math.round(difference * 400))) };
+    return { bpm:best.bpm, confidence:Math.max(0, Math.min(99, Math.round(difference * 420))) };
   }
 
   function keyInfo(value) {
@@ -821,7 +884,6 @@
       if (index >= 0) triggerKey(pianoMin + index, true);
     });
     document.addEventListener('keyup', event => { if (event.code === 'Space') toggleSustain(false); });
-    const tonal = $('#tonalSelect'); if (tonal) tonal.addEventListener('change', () => updateTonal(tonal.value));
 
   }
 

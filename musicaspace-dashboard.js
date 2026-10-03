@@ -606,9 +606,45 @@
     showToast.timer = window.setTimeout(() => el.classList.remove('show'), 2200);
   }
 
-  function showView(view) {
+  const routeViews = new Set([
+    'home','library','progressions','finder','assistant','tonal','metronome',
+    'tools','pianoVisualizer','mylibrary','playlists','practice','community'
+  ]);
+  const routeTitles = {
+    home:'Musica Space',
+    library:'Chord Library · Musica Space',
+    progressions:'Progressions · Musica Space',
+    finder:'Song Finder · Musica Space',
+    assistant:'AI Assistant · Musica Space',
+    tonal:'Tonal Recognition · Musica Space',
+    metronome:'Metronome · Musica Space',
+    tools:'Tools · Musica Space',
+    pianoVisualizer:'Piano Visualizer · Musica Space',
+    mylibrary:'My Library · Musica Space',
+    playlists:'Playlists · Musica Space',
+    practice:'Practice · Musica Space',
+    community:'Community · Musica Space'
+  };
+
+  function viewFromLocation() {
+    const raw = String(window.location.hash || '').replace(/^#/, '').trim();
+    let view = raw;
+    try { view = decodeURIComponent(raw); } catch (error) {}
+    return routeViews.has(view) ? view : 'home';
+  }
+
+  function syncViewRoute(view, replace) {
+    const hash = '#' + view;
+    if (window.location.hash === hash) return;
+    if (replace) window.history.replaceState(null, '', hash);
+    else window.history.pushState(null, '', hash);
+  }
+
+  function showView(view, options) {
     const target = $('#' + view + 'View');
     if (!target) return;
+    const settings = options || {};
+    if (!settings.fromRoute) syncViewRoute(view, Boolean(settings.replace));
     const app = document.querySelector('.app');
     if (app) app.classList.remove('menu-open');
     $$('.view').forEach(section => section.classList.toggle('active', section === target));
@@ -1066,7 +1102,8 @@
   setupAssistant();
   bindEvents();
   initPiano();
-  showView('home');
+  window.addEventListener('hashchange', () => showView(viewFromLocation(), { fromRoute:true }));
+  showView(viewFromLocation(), { replace:true });
   const ready = $('#toolFeedback');
   if (ready) ready.textContent = 'Semua modul siap. Navigasi dan tombol aktif.';
 })();

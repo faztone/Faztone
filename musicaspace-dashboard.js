@@ -22,7 +22,9 @@
     combo: 0,
     metroTimer: null,
     metroBpm: 92,
-    lastTap: 0
+    lastTap: 0,
+    chordCatalog: [],
+    chordCatalogLoaded: false
   };
 
   const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -1012,6 +1014,83 @@
     state.pianoReady = true;
   }
 
+  function renderChordCatalog(query) {
+    const target = $('#chordCards');
+    if (!target || !state.chordCatalogLoaded) return;
+    const term = String(query || '').trim().toLowerCase();
+    const songs = state.chordCatalog.filter(song => {
+      const haystack = [
+        song.title, song.artist, song.key, song.mode, song.difficulty,
+        ...(Array.isArray(song.tags) ? song.tags : []),
+        ...(Array.isArray(song.core_progression) ? song.core_progression : [])
+      ].join(' ').toLowerCase();
+      return !term || haystack.indexOf(term) >= 0;
+    });
+    target.innerHTML = '';
+    songs.forEach(song => {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'mini-card catalog-card';
+      card.dataset.catalogSong = song.id;
+      const progression = Array.isArray(song.core_progression) ? song.core_progression.join(' · ') : 'Chord progression tersedia';
+      const tags = Array.isArray(song.tags) ? song.tags.slice(0, 2).join(' · ') : 'Top chart';
+      card.innerHTML =
+        '<div class="cover">♫</div><div><h3></h3><p></p><span class="chart-badge"></span></div>';
+      const title = card.querySelector('h3');
+      const meta = card.querySelector('p');
+      const badge = card.querySelector('.chart-badge');
+      if (title) title.textContent = song.title || 'Untitled';
+      if (meta) meta.textContent = (song.artist || 'Unknown artist') + ' · ' + (song.key || '—') + ' · ' + (song.difficulty || 'reference');
+      if (badge) badge.textContent = progression + ' · ' + tags;
+      target.appendChild(card);
+    });
+    if (!songs.length) {
+      const empty = document.createElement('p');
+      empty.className = 'empty-state';
+      empty.textContent = 'Chord atau lagu tidak ditemukan.';
+      target.appendChild(empty);
+    }
+  }
+
+  async function loadChordCatalog() {
+    try {
+      const url = new URL('assets/data/musica-space-top-chart-chords.json', document.baseURI).toString();
+      const response = await fetch(url, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Chord catalog fetch failed');
+      const data = await response.json();
+      if (!data || !Array.isArray(data.songs)) throw new Error('Invalid chord catalog');
+      state.chordCatalog = data.songs;
+      state.chordCatalogLoaded = true;
+      const search = $('#chordSearch');
+      renderChordCatalog(search ? search.value : '');
+    } catch (error) {
+      state.chordCatalogLoaded = false;
+      const target = $('#chordCards');
+      if (target && !target.children.length) {
+        const empty = document.createElement('p');
+        empty.className = 'empty-state';
+        empty.textContent = 'Katalog chord belum bisa dimuat. Coba refresh.';
+        target.appendChild(empty);
+      }
+    }
+  }
+
+  function setupChordLibrary() {
+    const search = $('#chordSearch');
+    if (search) search.addEventListener('input', () => renderChordCatalog(search.value));
+    loadChordCatalog();
+  }
+
+  function openCatalogSong(id) {
+    const song = state.chordCatalog.find(item => item.id === id);
+    if (!song) return;
+    showView('pianoVisualizer');
+    const feedback = $('#pianoFeedback');
+    const progression = Array.isArray(song.core_progression) ? song.core_progression.join(' · ') : 'Progression tersedia';
+    if (feedback) feedback.textContent = song.title + ' · ' + progression;
+    showToast(song.title + ' dibuka di Piano Visualizer.');
+  }
+
   function renderCards() {
     const chordCards = $('#chordCards');
     if (chordCards) {
@@ -1073,6 +1152,8 @@
       if (viewButton) { event.preventDefault(); showView(viewButton.dataset.view); return; }
       const tool = event.target.closest('.tool-launch');
       if (tool) { showView(tool.dataset.tool === 'Piano Visualizer' ? 'pianoVisualizer' : 'tools'); const feedback = $('#toolFeedback'); if (feedback) feedback.textContent = tool.dataset.tool + ' dipilih. Modul siap dipakai.'; return; }
+      const catalogSong = event.target.closest('[data-catalog-song]');
+      if (catalogSong) { openCatalogSong(catalogSong.dataset.catalogSong); return; }
       const chordOpen = event.target.closest('[data-chord-open]');
       if (chordOpen) { showView('pianoVisualizer'); initPiano(); applyChord(chordOpen.dataset.chord); return; }
       const song = event.target.closest('[data-song]');
@@ -1093,6 +1174,7 @@
 
   replaceIcons();
   renderCards();
+  setupChordLibrary();
   renderChartCards();
   setupSongPlayer();
   setupTonalAnalyzer();

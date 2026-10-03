@@ -9,13 +9,17 @@
     window.__toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
   };
 
-  const songs = [
-    {title:'Midnight Drive',artist:'Original',key:'Cm',bpm:120,cover:'cover'},
-    {title:'Ocean Waves',artist:'Original',key:'G',bpm:95,cover:'ocean'},
-    {title:'Falling Slowly',artist:'Glen Hansard',key:'D',bpm:72,cover:'falling'},
-    {title:'Good Riddance',artist:'Green Day',key:'G',bpm:92,cover:'green'},
-    {title:'Someone Like You',artist:'Adele',key:'Ab',bpm:68,cover:'adele'},
-    {title:'Goodness of God',artist:'Bethel Music',key:'G',bpm:78,cover:'cover'}
+  let songs = [
+    {title:'BbY WOW',artist:'Karol G, Judeline & rusowsky',key:'B♭',bpm:104,cover:'cover',chartRank:1,search:'BbY WOW Karol G'},
+    {title:"Choosin' Texas",artist:'Ella Langley',key:'E',bpm:92,cover:'ocean',chartRank:2,search:"Choosin' Texas Ella Langley"},
+    {title:'Nicole Kidman',artist:'Adéla',key:'F♯',bpm:118,cover:'falling',chartRank:3,search:'Nicole Kidman Adéla'},
+    {title:'Training Season',artist:'Dua Lipa',key:'B minor',bpm:117,cover:'green',chartRank:4,search:'Training Season Dua Lipa'},
+    {title:"Ain't In LA",artist:'Adéla',key:'C♯ minor',bpm:108,cover:'adele',chartRank:5,search:"Ain't In LA Adéla"},
+    {title:'Dracula',artist:'Tame Impala & JENNIE',key:'E♭ minor',bpm:106,cover:'cover',chartRank:6,search:'Dracula Tame Impala Jennie'},
+    {title:'Hate That I Made You Love Me',artist:'Ariana Grande',key:'A♭',bpm:84,cover:'ocean',chartRank:7,search:'Hate That I Made You Love Me Ariana Grande'},
+    {title:'So Easy (To Fall In Love)',artist:'Olivia Dean',key:'C',bpm:96,cover:'falling',chartRank:8,search:'So Easy To Fall In Love Olivia Dean'},
+    {title:'Man I Need',artist:'Olivia Dean',key:'G',bpm:100,cover:'green',chartRank:9,search:'Man I Need Olivia Dean'},
+    {title:'Be Her',artist:'Ella Langley',key:'D',bpm:76,cover:'adele',chartRank:10,search:'Be Her Ella Langley'}
   ];
   const progressions = [
     {title:'Chill Pop Progression',chords:'C · Am · F · G',tag:'Pop',className:''},
@@ -32,8 +36,9 @@
   };
   $$('[data-view]').forEach(button => button.addEventListener('click', () => showView(button.dataset.view)));
 
-  const songMarkup = song => `<div class="song-row"><div class="cover ${song.cover}">${song.title === 'Midnight Drive' ? '♫' : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart" aria-label="Favorite ${song.title}">♥</button><button class="more" aria-label="More options">•••</button></div>`;
-  $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join('');
+  const songMarkup = (song,index) => `<div class="song-row"><button class="play-small" data-song-play="${index}" aria-label="Play ${song.title}">▶</button><div class="cover ${song.cover}">${song.chartRank ? `#${song.chartRank}` : '♪'}</div><div class="song-meta"><strong>${song.title}</strong><small>${song.artist}</small></div><span class="song-key">${song.key}</span><span class="song-bpm">${song.bpm} BPM</span><button class="heart" aria-label="Favorite ${song.title}">♥</button><button class="more" aria-label="More options">•••</button></div>`;
+  const renderRecentSongs = () => { $('#recentSongs').innerHTML = songs.slice(0,5).map(songMarkup).join(''); };
+  renderRecentSongs();
   const progressionMarkup = item => `<div class="progress-row"><button class="play-small" data-progression="${item.title}">▶</button><div class="progress-meta"><strong>${item.title}</strong><small>${item.chords}</small></div><span class="tag ${item.className}">${item.tag}</span><button class="more">•••</button></div>`;
   $('#savedProgressions').innerHTML = progressions.map(progressionMarkup).join('');
 
@@ -53,6 +58,8 @@
   };
   renderProgressionPage();
   document.addEventListener('click', event => {
+    const songIndex = event.target.closest('[data-song-play]')?.dataset.songPlay;
+    if (songIndex !== undefined) playSong(Number(songIndex));
     const progression = event.target.closest('[data-progression]')?.dataset.progression;
     if (progression) {
       const item = progressions.find(entry => entry.title === progression);
@@ -64,21 +71,67 @@
 
   const waveform = $('#waveform');
   for (let i=0;i<72;i++) { const bar=document.createElement('b'); bar.style.height=`${12 + ((i*17)%48)}%`; waveform.appendChild(bar); }
+  const audioPreview = $('#audioPreview');
+  let currentSongIndex = 0;
   let playing = false;
-  let playerTimer;
-  let playerSeconds = 48;
-  $('#playBtn').addEventListener('click', () => {
-    playing = !playing;
+  let playerSeconds = 0;
+  const formatTime = value => `${Math.floor(value/60)}:${String(Math.floor(value%60)).padStart(2,'0')}`;
+  const setPlayerUI = () => {
+    const song = songs[currentSongIndex];
+    if (!song) return;
+    $('#playerTitle').textContent = song.title;
+    $('#playerArtist').textContent = `${song.artist} · Chart #${song.chartRank || '—'}`;
+    $('#playerCover').className = `cover ${song.cover}`;
+    $('#playerCover').textContent = song.chartRank ? `#${song.chartRank}` : '♫';
+    $('#playerTime').textContent = formatTime(audioPreview?.currentTime || playerSeconds);
+    $('#playerDuration').textContent = formatTime(audioPreview?.duration || 30);
     $('#playBtn').textContent = playing ? 'Ⅱ' : '▶';
     waveform.classList.toggle('playing', playing);
-    clearInterval(playerTimer);
-    if (playing) {
-      toast('Now playing · Midnight Drive');
-      playerTimer = setInterval(() => { playerSeconds = playerSeconds >= 204 ? 0 : playerSeconds + 1; $('#playerTime').textContent = `${Math.floor(playerSeconds/60)}:${String(playerSeconds%60).padStart(2,'0')}`; }, 1000);
+  };
+  const fetchPreview = async song => {
+    if (song.previewUrl) return song.previewUrl;
+    const response = await fetch(`https://itunes.apple.com/search?term=${encodeURIComponent(song.search || `${song.title} ${song.artist}`)}&entity=song&limit=1&country=US`);
+    if (!response.ok) throw new Error('Preview service unavailable');
+    const result = await response.json();
+    const match = result.results?.[0];
+    song.previewUrl = match?.previewUrl || '';
+    return song.previewUrl;
+  };
+  const playSong = async index => {
+    currentSongIndex = (index + songs.length) % songs.length;
+    const song = songs[currentSongIndex];
+    setPlayerUI();
+    try {
+      if (!song.previewUrl) { toast(`Loading preview · ${song.title}`); await fetchPreview(song); }
+      if (!song.previewUrl) throw new Error('Preview not found');
+      audioPreview.src = song.previewUrl;
+      await audioPreview.play();
+      playing = true;
+      setPlayerUI();
+      toast(`Now playing · ${song.title}`);
+    } catch (error) {
+      playing = false;
+      setPlayerUI();
+      toast(`Preview ${song.title} belum tersedia`);
     }
+  };
+  const stopSong = () => { audioPreview.pause(); playing = false; setPlayerUI(); };
+  $('#playBtn').addEventListener('click', () => playing ? stopSong() : playSong(currentSongIndex));
+  $('#prevBtn').addEventListener('click', () => playSong(currentSongIndex - 1));
+  $('#nextBtn').addEventListener('click', () => playSong(currentSongIndex + 1));
+  $('#shuffleBtn').addEventListener('click', () => playSong(Math.floor(Math.random() * songs.length)));
+  $('#repeatBtn').addEventListener('click', () => { audioPreview.loop = !audioPreview.loop; toast(audioPreview.loop ? 'Repeat preview on' : 'Repeat preview off'); });
+  audioPreview.addEventListener('timeupdate', () => { playerSeconds=audioPreview.currentTime; setPlayerUI(); });
+  audioPreview.addEventListener('loadedmetadata', setPlayerUI);
+  audioPreview.addEventListener('ended', () => { playing=false; if (!audioPreview.loop) playSong(currentSongIndex + 1); });
+  setPlayerUI();
+  $('#chartCount').textContent = songs.length;
+  Promise.allSettled(songs.map(fetchPreview)).then(results => {
+    const ready = results.filter(result => result.status === 'fulfilled' && result.value).length;
+    $('#chartStatus').textContent = `${ready}/${songs.length} previews ready · Billboard Global 200`;
+    $('#previewCount').textContent = ready ? '30s' : '—';
+    setPlayerUI();
   });
-  $('#prevBtn').addEventListener('click', () => toast('Previous song'));
-  $('#nextBtn').addEventListener('click', () => toast('Next song'));
   $('#watchTour').addEventListener('click', () => toast('Tour mode is ready for the next update'));
   $('#customizeBtn').addEventListener('click', () => toast('Quick Access layout saved'));
   $('#upgradeBtn').addEventListener('click', () => toast('Pro upgrade flow coming soon'));
@@ -87,7 +140,7 @@
   $('#addSongBtn').addEventListener('click', () => toast('Song editor opened'));
   $('#newProgressionBtn').addEventListener('click', () => toast('New progression created'));
   $('#newPlaylistBtn').addEventListener('click', () => toast('New playlist created'));
-  $('#startPractice').addEventListener('click', () => toast('Practice session started · 45 min'));
+  $('#startPractice').addEventListener('click', () => { $('#sessionState').textContent = 'Active'; toast('Practice session started · 45 min'); });
   $('#joinCircle').addEventListener('click', () => toast('Community circles opened'));
 
   const finder = query => {

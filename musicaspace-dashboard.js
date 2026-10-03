@@ -362,101 +362,82 @@
     tick(); metronomeTimer=setInterval(tick,60000/tempo); toast(`${tempo} BPM metronome started`);
   });
 
-  const pianoVisualizerPanel = $('#pianoVisualizerPanel');
+  const pianoVisualizerPanel = $('#pianoVisualizerView');
   const toolPanel = $('#toolPanel');
-  const openPianoVisualizer = () => {
-    if (!pianoVisualizerPanel) return;
-    pianoVisualizerPanel.hidden = false;
-    if (toolPanel) toolPanel.hidden = true;
-    pianoVisualizerPanel.scrollIntoView({behavior:'smooth', block:'start'});
-    renderVisualizerScale();
+  const noteNames = ['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
+  const pianoMinMidi = 48;
+  const pianoMaxMidi = 84;
+  const midiName = midi => noteNames[midi % 12] + (Math.floor(midi / 12) - 1);
+  const practiceSongs = {
+    'fur-elise': {name:'Fur Elise · Trial', tempo:112, notes:[76,75,76,75,76,71,74,72,69,60,64,69,71,64,68,71,72,64,76,75,76,75,76,71,74,72,69,60,64,69,71,64,72,71,69,64,76,75,76,75,76,71,74,72,69,60,64,69,71,64,72,71,69]},
+    'c-major-warmup': {name:'C Major Warmup', tempo:96, notes:[60,62,64,65,67,69,71,72,71,69,67,65,64,62,60,72,71,69,67,65,64,62,60]}
   };
-  $$('.tool-launch').forEach(button => button.addEventListener('click', () => {
-    if (button.dataset.tool === 'Piano Visualizer') { openPianoVisualizer(); toast('Piano Visualizer opened'); return; }
-    if (pianoVisualizerPanel) pianoVisualizerPanel.hidden = true;
-    if (toolPanel) toolPanel.hidden = false;
-    $('#toolPanelTitle').textContent=button.dataset.tool;
-    $('#toolPanelText').textContent=button.dataset.tool+' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';
-    toast(button.dataset.tool+' opened');
-  }));
-
+  let songPracticeRunning=false, songPracticeExpected=null, songPracticeResolved=false, songPracticePosition=0, songPracticeTimer=null, songDemoTimer=null;
+  let songScore=0, songHits=0, songMisses=0, songCombo=0;
   const visualizerKeyboard = $('#visualizerKeyboard');
   const visualizerNotes = $('#visualizerNotes');
   const visualizerLastNote = $('#visualizerLastNote');
-  const visualizerScale = $('#visualizerScale');
-  const visualizerScaleNotes = $('#visualizerScaleNotes');
-  const visualizerNatural = ['C','D','E','F','G','A','B','C'];
-  const visualizerNaturalOffsets = [0,2,4,5,7,9,11,12];
-  const visualizerBlack = [
-    {name:'C♯', offset:1, left:'10.6%'},
-    {name:'D♯', offset:3, left:'23.1%'},
-    {name:'F♯', offset:6, left:'48.1%'},
-    {name:'G♯', offset:8, left:'60.6%'},
-    {name:'A♯', offset:10, left:'73.1%'}
-  ];
-  const scaleMap = {
-    'C-major': {label:'C · D · E · F · G · A · B', offsets:[0,2,4,5,7,9,11,12]},
-    'G-major': {label:'G · A · B · C · D · E · F♯', offsets:[7,9,11,12,14,16,18]},
-    'A-minor': {label:'A · B · C · D · E · F · G', offsets:[9,11,12,14,16,17,19]},
-    'D-minor': {label:'D · E · F · G · A · B♭ · C', offsets:[2,4,5,7,9,10,12]}
+  const songPracticeFeedback = $('#pianoSongFeedback');
+  const songScoreEl = $('#pianoSongScore');
+  const songHitsEl = $('#pianoSongHits');
+  const songMissesEl = $('#pianoSongMisses');
+  const songComboEl = $('#pianoSongCombo');
+  const practiceSongSelect = $('#pianoSongSelect');
+  const practiceSpeedSelect = $('#pianoSongSpeed');
+  const updatePracticeStats = () => { if(songScoreEl) songScoreEl.textContent=songScore; if(songHitsEl) songHitsEl.textContent=songHits; if(songMissesEl) songMissesEl.textContent=songMisses; if(songComboEl) songComboEl.textContent=songCombo; };
+  const practiceMessage = (message,kind='') => { if(songPracticeFeedback){songPracticeFeedback.textContent=message;songPracticeFeedback.className='practice-feedback '+kind;} };
+  const clearPracticeNotes = () => { if(visualizerNotes) visualizerNotes.innerHTML=''; };
+  const noteLeft = midi => ((midi-pianoMinMidi)/(pianoMaxMidi-pianoMinMidi))*100;
+  const spawnPracticeNote = (midi,index,beatMs) => { if(!visualizerNotes)return; const note=document.createElement('span'); note.className='note-fall'; note.dataset.practiceIndex=index; note.dataset.midi=midi; note.style.left='calc('+Math.min(98,Math.max(1,noteLeft(midi)))+'% - 10px)'; note.style.width='20px'; note.style.animationDuration=Math.max(1.35,beatMs/1000*1.15)+'s'; visualizerNotes.appendChild(note); setTimeout(()=>note.remove(),Math.max(1500,beatMs*1.35)); };
+  const setPianoKeyActive = midi => { const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]'); if(!key)return; key.classList.add('active'); setTimeout(()=>key.classList.remove('active'),220); };
+  const renderPracticeKeyboard = () => {
+    if(!visualizerKeyboard)return;
+    const whites=[], whiteMidi=[];
+    for(let midi=pianoMinMidi;midi<=pianoMaxMidi;midi++) if(![1,3,6,8,10].includes(midi%12)){whiteMidi.push(midi);whites.push('<button class="visual-white" data-midi="'+midi+'" data-note-name="'+midiName(midi)+'" type="button"><span>'+midiName(midi)+'</span></button>');}
+    const whiteCount=whiteMidi.length, blacks=[];
+    for(let midi=pianoMinMidi;midi<=pianoMaxMidi;midi++) if([1,3,6,8,10].includes(midi%12)){const previous=whiteMidi.filter(item=>item<midi).length;const left=((previous-.35)/whiteCount)*100;blacks.push('<button class="visual-black" style="left:'+left+'%;width:'+Math.max(18,Math.round(100/whiteCount*0.62))+'px" data-midi="'+midi+'" data-note-name="'+midiName(midi)+'" type="button"><span>'+midiName(midi)+'</span></button>');}
+    visualizerKeyboard.innerHTML=whites.join('')+blacks.join('');
   };
-  const renderVisualizerKeyboard = () => {
-    if (!visualizerKeyboard) return;
-    visualizerKeyboard.innerHTML = visualizerNatural.map((name,index) => '<button class="visual-white" data-visual-note="'+visualizerNaturalOffsets[index]+'" data-note-name="'+name+'4" type="button"><span>'+name+'</span></button>').join('') + visualizerBlack.map(item => '<button class="visual-black" style="left:'+item.left+'" data-visual-note="'+item.offset+'" data-note-name="'+item.name+'4" type="button"><span>'+item.name+'</span></button>').join('');
+  const triggerPianoKey = key => {
+    if(!key)return;
+    const midi=Number(key.dataset.midi);
+    setPianoKeyActive(midi);
+    if(visualizerLastNote)visualizerLastNote.textContent='Playing · '+key.dataset.noteName;
+    playTone(midi-60,.95);
+    if(!songPracticeRunning)return;
+    const current=visualizerNotes?.querySelector('[data-practice-index="'+(songPracticePosition-1)+'"]');
+    if(midi===songPracticeExpected&&!songPracticeResolved){songPracticeResolved=true;songHits++;songCombo++;songScore+=100+(songCombo-1)*10;if(current){current.classList.add('hit');setTimeout(()=>current.remove(),180);}practiceMessage('✓ Correct · '+key.dataset.noteName,'good');}
+    else{songMisses++;songCombo=0;songScore=Math.max(0,songScore-25);practiceMessage('✕ Wrong note · follow the falling key','bad');}
+    updatePracticeStats();
   };
-  const renderVisualizerScale = () => {
-    const selected = scaleMap[visualizerScale?.value] || scaleMap['C-major'];
-    if (visualizerScaleNotes) visualizerScaleNotes.textContent = selected.label;
-    $$('#visualizerKeyboard [data-visual-note]').forEach(key => key.classList.toggle('scale-note', selected.offsets.includes(Number(key.dataset.visualNote))));
+  const registerPracticeMiss = () => {
+    if(songPracticeExpected===null||songPracticeResolved)return;
+    songPracticeResolved=true;songMisses++;songCombo=0;songScore=Math.max(0,songScore-50);
+    const current=visualizerNotes?.querySelector('[data-practice-index="'+(songPracticePosition-1)+'"]');
+    if(current){current.classList.add('missed');setTimeout(()=>current.remove(),220);}
+    practiceMessage('Missed · the expected note was '+midiName(songPracticeExpected),'bad');updatePracticeStats();
   };
-  const spawnVisualizerNote = (offset) => {
-    if (!visualizerNotes) return;
-    const note = document.createElement('span');
-    note.className = 'note-fall';
-    note.style.left = 'calc('+Math.min(95, Math.max(1, offset / 12 * 100))+'% - 9px)';
-    note.style.width = '18px';
-    visualizerNotes.appendChild(note);
-    setTimeout(() => note.remove(), 1900);
+  const stopSongPractice = (message='Ready for a new trial.') => { clearInterval(songPracticeTimer);songPracticeTimer=null;clearInterval(songDemoTimer);songDemoTimer=null;songPracticeRunning=false;songPracticeExpected=null;songPracticeResolved=false;clearPracticeNotes();if(message)practiceMessage(message); };
+  const startSongPractice = () => {
+    stopSongPractice('');const song=practiceSongs[practiceSongSelect?.value]||practiceSongs['fur-elise'];const speed=Number(practiceSpeedSelect?.value||1);const beatMs=(60000/song.tempo)/speed;
+    songPracticeRunning=true;songPracticePosition=0;songScore=0;songHits=0;songMisses=0;songCombo=0;updatePracticeStats();practiceMessage('Trial started · press the falling notes at the PLAY HERE line');
+    const tick=()=>{if(songPracticeExpected!==null&&!songPracticeResolved)registerPracticeMiss();if(songPracticePosition>=song.notes.length){stopSongPractice('');practiceMessage('Practice complete · score '+songScore+' · '+songHits+' correct','finish');return;}songPracticeExpected=song.notes[songPracticePosition];songPracticeResolved=false;spawnPracticeNote(songPracticeExpected,songPracticePosition,beatMs);songPracticePosition++;};
+    tick();songPracticeTimer=setInterval(tick,beatMs);
   };
-  const triggerVisualizerNote = (key) => {
-    if (!key) return;
-    const offset = Number(key.dataset.visualNote);
-    key.classList.add('active');
-    setTimeout(() => key.classList.remove('active'), 220);
-    spawnVisualizerNote(offset);
-    if (visualizerLastNote) visualizerLastNote.textContent = 'Playing · '+key.dataset.noteName;
-    playTone(offset, .95);
+  const demoPracticeSong = () => {
+    stopSongPractice('');const song=practiceSongs[practiceSongSelect?.value]||practiceSongs['fur-elise'];const speed=Number(practiceSpeedSelect?.value||1);const beatMs=(60000/song.tempo)/speed;let position=0;practiceMessage('Demo playing · watch the falling notes');
+    const tick=()=>{if(position>=song.notes.length){clearInterval(songDemoTimer);songDemoTimer=null;practiceMessage('Demo complete · press Start practice to try it','finish');return;}const midi=song.notes[position];const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');spawnPracticeNote(midi,position,beatMs);triggerPianoKey(key);position++;};tick();songDemoTimer=setInterval(tick,beatMs);
   };
-  renderVisualizerKeyboard();
-  renderVisualizerScale();
-  visualizerKeyboard?.addEventListener('pointerdown', event => {
-    const key = event.target.closest('[data-visual-note]');
-    if (key) { event.preventDefault(); triggerVisualizerNote(key); }
-  });
-  visualizerScale?.addEventListener('change', renderVisualizerScale);
-  const computerNoteMap = {a:0,w:1,s:2,e:3,d:4,f:5,t:6,g:7,y:8,h:9,u:10,j:11,k:12};
-  window.addEventListener('keydown', event => {
-    if (event.repeat || ['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)) return;
-    const offset = computerNoteMap[event.key.toLowerCase()];
-    if (offset === undefined) return;
-    const key = visualizerKeyboard?.querySelector('[data-visual-note="'+offset+'"]');
-    triggerVisualizerNote(key);
-  });
-  let demoTimer;
-  $('#demoPiano')?.addEventListener('click', () => {
-    clearInterval(demoTimer);
-    const demo = [0,4,7,12,7,4,2,0];
-    let position = 0;
-    const playNext = () => {
-      const key = visualizerKeyboard?.querySelector('[data-visual-note="'+demo[position % demo.length]+'"]');
-      triggerVisualizerNote(key);
-      position += 1;
-      if (position >= demo.length) { clearInterval(demoTimer); demoTimer = null; }
-    };
-    playNext();
-    demoTimer = setInterval(playNext, 520);
-    toast('Piano demo started');
-  });
+  const computerNoteMap={z:48,s:49,x:50,d:51,c:52,v:53,g:54,b:55,h:56,n:57,j:58,m:59,q:60,'2':61,w:62,'3':63,e:64,r:65,'5':66,t:67,'6':68,y:69,'7':70,u:71,i:72};
+  const openPianoVisualizer=()=>{showView('pianoVisualizer');renderPracticeKeyboard();pianoVisualizerPanel?.scrollIntoView({behavior:'smooth',block:'start'});if(visualizerLastNote)visualizerLastNote.textContent='Ready to play · C3–C6';};
+  $$('.tool-launch').forEach(button=>button.addEventListener('click',()=>{if(button.dataset.tool==='Piano Visualizer'){openPianoVisualizer();toast('Piano Visualizer opened');return;}showView('tools');$('#toolPanelTitle').textContent=button.dataset.tool;$('#toolPanelText').textContent=button.dataset.tool+' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';toast(button.dataset.tool+' opened');}));
+  $('#backToTools')?.addEventListener('click',()=>showView('tools'));
+  $('#pianoSongStart')?.addEventListener('click',startSongPractice);
+  $('#pianoSongStop')?.addEventListener('click',()=>stopSongPractice('Practice stopped.'));
+  $('#pianoSongDemo')?.addEventListener('click',demoPracticeSong);
+  visualizerKeyboard?.addEventListener('pointerdown',event=>{const key=event.target.closest('[data-midi]');if(key){event.preventDefault();triggerPianoKey(key);}});
+  window.addEventListener('keydown',event=>{if(event.repeat||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const midi=computerNoteMap[event.key.toLowerCase()];if(midi===undefined)return;const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');if(key){event.preventDefault();triggerPianoKey(key);}});
+  renderPracticeKeyboard();
 
   const tonalInput = $('#tonalAudio');
   tonalInput.addEventListener('change', () => { const file=tonalInput.files[0]; if(file){ $('#tonalPlayer').src=URL.createObjectURL(file); $('#tonalStatus').textContent=file.name; } });

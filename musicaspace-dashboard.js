@@ -257,441 +257,61 @@
     return { bpm:bestBpm, confidence:confidence };
   }
 
+  function keyInfo(value) {
+    const normalized = String(value || '').replace(/\s+/g, ' ').trim();
+    if (keyData[normalized]) return keyData[normalized];
+    const rootName = normalized.replace(/ Major$/i, '');
+    const rootNames = ['C','Db','D','Eb','E','F','Gb','G','Ab','A','Bb','B'];
+    const root = rootNames.indexOf(rootName);
+    if (root >= 0) {
+      const names = ['C Major','Db Major','D Major','Eb Major','E Major','F Major','Gb Major','G Major','Ab Major','A Major','Bb Major','B Major'];
+      return keyData[names[root]] || keyData['C Major'];
+    }
+    return keyData['C Major'];
+  }
+
+  function renderTonalSummary() {
+    const summary = $('#tonalSummary');
+    if (!summary) return;
+    const key = state.detectedKey;
+    const tempo = state.detectedTempo;
+    if (!key && !tempo) {
+      summary.textContent = 'Belum ada hasil analisis.';
+      return;
+    }
+    const parts = [];
+    if (key) {
+      const info = keyInfo(key);
+      parts.push('Tonal ' + key + ' · signature ' + info.signature + ' · relative minor ' + info.relative);
+    }
+    if (tempo) parts.push('tempo ' + tempo + ' BPM');
+    summary.textContent = parts.join(' · ');
+  }
+
   function updateTonal(value, confidence) {
-    const data = keyData[value] || keyData['C Major'];
-    const result = $('#tonalResult'); const sharp = $('#tonalSharp'); const minor = $('#relativeMinor'); const confidenceEl = $('#tonalConfidence'); const summary = $('#tonalSummary');
-    if (result) result.textContent = value;
-    if (sharp) sharp.textContent = data.signature;
-    if (minor) minor.textContent = data.relative;
+    const normalized = String(value || 'C Major').replace(/\s+/g, ' ').trim();
+    const info = keyInfo(normalized);
+    state.detectedKey = normalized;
+    state.keyConfidence = typeof confidence === 'number' ? confidence : null;
+    const result = $('#tonalResult');
+    const sharp = $('#tonalSharp');
+    const minor = $('#relativeMinor');
+    const confidenceEl = $('#tonalConfidence');
+    const select = $('#tonalSelect');
+    if (result) result.textContent = normalized;
+    if (sharp) sharp.textContent = info.signature || '—';
+    if (minor) minor.textContent = info.relative || '—';
     if (confidenceEl) confidenceEl.textContent = 'Key confidence: ' + (typeof confidence === 'number' ? confidence + '%' : '—');
-    if (summary) summary.textContent = 'Tonal ' + value + ' · signature ' + data.signature + ' · relative minor ' + data.relative;
-    const select = $('#tonalSelect'); if (select) select.value = value;
+    if (select && Array.from(select.options || []).some(option => option.value === normalized)) select.value = normalized;
+    renderTonalSummary();
   }
 
   function updateTempo(tempo, confidence) {
+    state.detectedTempo = tempo || null;
+    state.tempoConfidence = typeof confidence === 'number' ? confidence : null;
     const tempoEl = $('#tonalTempo');
     if (tempoEl) tempoEl.textContent = tempo ? tempo + ' BPM' : '— BPM';
-    const summary = $('#tonalSummary');
-    if (summary && tempo) summary.textContent += ' · tempo ' + tempo + ' BPM';
-    const status = $('#tonalStatus');
-    if (status && tempo) status.textContent += ' Tempo: ' + tempo + ' BPM.';
-  }
-
-  async function decodeTonalFile(file) {
-    if (!file) throw new Error('No audio file');
-    if (state.tonalFile === file && state.tonalBuffer) return state.tonalBuffer;
-    if (!ensureAudio()) throw new Error('AudioContext unavailable');
-    state.tonalBuffer = await state.audio.decodeAudioData(await file.arrayBuffer());
-    state.tonalFile = file;
-    return state.tonalBuffer;
-  }
-
-  async function analyzeTonalFile(file) {
-    const status = $('#tonalStatus');
-    if (!file) { if (status) status.textContent = 'Pilih file audio terlebih dahulu.'; return; }
-    if (status) status.textContent = 'Menganalisis tonal dan tempo…';
-    try {
-      const buffer = await decodeTonalFile(file);
-      const result = estimateMajorKey(buffer);
-      const tempo = detectTempoBpm(buffer);
-      updateTonal(result.key, result.confidence);
-      updateTempo(tempo.bpm, tempo.confidence);
-      if (status) status.textContent = result.signal ? 'Analisis selesai. Kandidat Major ditemukan.' : 'Sinyal musik terlalu lemah untuk dipastikan.';
-      showToast('Tonal ' + result.key + ' · ' + (tempo.bpm || '—') + ' BPM');
-    } catch (error) {
-      if (status) status.textContent = 'Audio tidak bisa dianalisis. Coba WAV/MP3 lain yang berisi musik.';
-      showToast('Analisis audio gagal.');
-    }
-  }
-
-  async function analyzeTempoFile(file) {
-    const status = $('#tonalStatus');
-    if (!file) { if (status) status.textContent = 'Pilih file audio terlebih dahulu.'; return; }
-    if (status) status.textContent = 'Mendeteksi tempo…';
-    try {
-      const buffer = await decodeTonalFile(file);
-      const tempo = detectTempoBpm(buffer);
-      updateTempo(tempo.bpm, tempo.confidence);
-      if (status) status.textContent = tempo.bpm ? 'Tempo terdeteksi.' : 'Beat terlalu lemah untuk menentukan tempo.';
-      showToast(tempo.bpm ? tempo.bpm + ' BPM' : 'Tempo tidak ditemukan');
-    } catch (error) {
-      if (status) status.textContent = 'Tempo detector gagal membaca file.';
-    }
-  }
-
-  function setupTonalAnalyzer() {
-    const file = $('#tonalFile'); const analyze = $('#tonalAnalyze'); const tempoButton = $('#tempoAnalyze'); const preview = $('#tonalPreview');
-    if (!file || !analyze) return;
-    file.addEventListener('change', () => { const selected = file.files && file.files[0]; state.tonalBuffer = null; state.tonalFile = null; if (selected && preview) preview.src = URL.createObjectURL(selected); });
-    analyze.addEventListener('click', () => analyzeTonalFile(file.files && file.files[0]));
-    if (tempoButton) tempoButton.addEventListener('click', () => analyzeTempoFile(file.files && file.files[0]));
-  }
-
-  function resetTonalAnalysis() {
-    updateTonal('C Major', 0);
-    updateTempo(null, 0);
-    const status = $('#tonalStatus'); const confidence = $('#tonalConfidence'); const summary = $('#tonalSummary');
-    if (status) status.textContent = 'Belum ada audio. Pilih file untuk mulai analisis.';
-    if (confidence) confidence.textContent = 'Key confidence: —';
-    if (summary) summary.textContent = 'Belum ada hasil analisis.';
-  }
-
-  function setAuthSession(session) {
-    state.session = session;
-    const user = session && session.user;
-    const name = user && (user.user_metadata && (user.user_metadata.full_name || user.user_metadata.name) || user.email) || 'Faza';
-    const avatar = user && user.user_metadata && user.user_metadata.avatar_url;
-    const top = $('.top-actions .avatar'); const bottom = $('.profile strong'); const message = $('#authMessage');
-    if (top) { top.textContent = user ? name.slice(0,1).toUpperCase() : 'F'; if (avatar) top.style.backgroundImage = 'url(' + avatar + ')'; }
-    if (bottom) bottom.textContent = name;
-    if (message) message.textContent = user ? 'Signed in as ' + name : 'Belum login. Pilih Google untuk masuk.';
-  }
-
-  function setupAuth() {
-    const modal = $('#authModal'); const message = $('#authMessage');
-    const open = () => { if (modal) modal.classList.remove('hidden'); };
-    const close = () => { if (modal) modal.classList.add('hidden'); };
-    Array.from(document.querySelectorAll('[data-action="profile"]')).forEach(button => button.addEventListener('click', open));
-    const closeButton = $('#closeAuth'); if (closeButton) closeButton.addEventListener('click', close);
-    if (modal) modal.addEventListener('click', event => { if (event.target === modal) close(); });
-    const google = $('#googleLogin'); const logout = $('#logoutButton');
-    if (!window.supabase || !window.supabase.createClient) { if (message) message.textContent = 'Auth service belum termuat. Coba refresh halaman.'; return; }
-    authClient = window.supabase.createClient('https://pyokprmnijoowrpaopyo.supabase.co', 'sb_publishable_3oB-xmqTGDPDYYSLXpGPiw_NdH1R0xC');
-    authClient.auth.getSession().then(result => setAuthSession(result.data.session)).catch(() => {});
-    authClient.auth.onAuthStateChange((event, session) => setAuthSession(session));
-    if (google) google.addEventListener('click', async () => {
-      if (message) message.textContent = 'Membuka Google…';
-      const result = await authClient.auth.signInWithOAuth({ provider:'google', options:{ redirectTo: window.location.origin + window.location.pathname } });
-      if (result.error && message) message.textContent = 'Login gagal: ' + result.error.message;
-    });
-    if (logout) logout.addEventListener('click', async () => { if (authClient) await authClient.auth.signOut(); close(); showToast('Kamu sudah logout.'); });
-  }
-
-  async function persistFavorite(song) {
-    if (!song) { showToast('Pilih lagu dulu.'); return; }
-    try {
-      const saved = JSON.parse(localStorage.getItem('musicspace-favorites') || '[]');
-      if (!saved.some(item => item.id === song.id)) saved.push(song);
-      localStorage.setItem('musicspace-favorites', JSON.stringify(saved));
-    } catch (error) {}
-    if (authClient && state.session && state.session.user) {
-      const result = await authClient.from('favorites').upsert({ user_id:state.session.user.id, song_id:song.id, title:song.title, artist:song.artist, song_key:song.key, bpm:song.bpm }, { onConflict:'user_id,song_id' });
-      if (result.error) showToast('Tersimpan lokal; tabel backend belum siap.');
-      else showToast('Favorite tersimpan ke akun.');
-    } else showToast('Favorite tersimpan di perangkat. Login untuk sinkronisasi.');
-  }
-
-  function showToast(message) {
-    const el = $('#toast');
-    if (!el) return;
-    el.textContent = message;
-    el.classList.add('show');
-    window.clearTimeout(showToast.timer);
-    showToast.timer = window.setTimeout(() => el.classList.remove('show'), 2200);
-  }
-
-  function showView(view) {
-    const target = $('#' + view + 'View');
-    if (!target) return;
-    $$('.view').forEach(section => section.classList.toggle('active', section === target));
-    $$('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
-    state.view = view;
-    if (view === 'pianoVisualizer') initPiano();
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  function noteLabel(midi) {
-    return noteNames[midi % 12] + (Math.floor(midi / 12) - 1);
-  }
-
-  function isBlack(midi) {
-    return [1,3,6,8,10].indexOf(midi % 12) >= 0;
-  }
-
-  function renderKeyboard() {
-    const keyboard = $('#visualizerKeyboard');
-    if (!keyboard || keyboard.dataset.rendered === 'true') return;
-    keyboard.dataset.rendered = 'true';
-    const white = [];
-    for (let midi = pianoMin; midi <= pianoMax; midi += 1) {
-      if (!isBlack(midi)) {
-        const key = document.createElement('button');
-        key.type = 'button';
-        key.className = 'white-key';
-        key.dataset.midi = String(midi);
-        key.textContent = noteLabel(midi);
-        white.push(key);
-        keyboard.appendChild(key);
-      }
-    }
-    let whiteIndex = 0;
-    for (let midi = pianoMin; midi <= pianoMax; midi += 1) {
-      if (isBlack(midi)) {
-        const key = document.createElement('button');
-        key.type = 'button';
-        key.className = 'black-key';
-        key.dataset.midi = String(midi);
-        key.textContent = noteLabel(midi);
-        key.style.left = (6 + whiteIndex * (88 / white.length)) + '%';
-        keyboard.appendChild(key);
-      } else {
-        whiteIndex += 1;
-      }
-    }
-  }
-
-  function ensureAudio() {
-    if (state.audio) {
-      if (state.audio.state === 'suspended') state.audio.resume();
-      return true;
-    }
-    const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtor) {
-      const status = $('#audioStatus');
-      if (status) status.textContent = 'Browser audio unavailable';
-      return false;
-    }
-    state.audio = new AudioCtor();
-    state.master = state.audio.createGain();
-    state.master.gain.value = 0.72;
-    state.master.connect(state.audio.destination);
-    const status = $('#audioStatus');
-    if (status) status.textContent = 'HQ piano engine ready';
-    return true;
-  }
-
-  function frequency(midi) {
-    return 440 * Math.pow(2, (midi - 69) / 12);
-  }
-
-  function releaseVoice(midi) {
-    const voice = state.activeVoices.get(midi);
-    if (!voice || !state.audio) return;
-    const now = state.audio.currentTime;
-    try {
-      voice.gain.gain.cancelScheduledValues(now);
-      voice.gain.gain.setTargetAtTime(0.0001, now, 0.18);
-      voice.osc.stop(now + 0.75);
-    } catch (error) {}
-    state.activeVoices.delete(midi);
-  }
-
-  function playTone(midi, duration) {
-    if (!ensureAudio()) return;
-    const now = state.audio.currentTime;
-    const osc = state.audio.createOscillator();
-    const gain = state.audio.createGain();
-    const filter = state.audio.createBiquadFilter();
-    const naturalRelease = duration || 1.6;
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(frequency(midi), now);
-    filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(4200, now);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.42, now + 0.012);
-    gain.gain.exponentialRampToValueAtTime(0.17, now + 0.28);
-    gain.gain.setTargetAtTime(0.0001, now + naturalRelease, 0.24);
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(state.master);
-    const voice = { osc: osc, gain: gain };
-    state.activeVoices.set(midi, voice);
-    osc.onended = () => { if (state.activeVoices.get(midi) === voice) state.activeVoices.delete(midi); };
-    osc.start(now);
-    osc.stop(now + naturalRelease + 1.15);
-  }
-
-  function setKeyVisual(midi, active) {
-    const key = $('#visualizerKeyboard [data-midi="' + midi + '"]');
-    if (key) key.classList.toggle('active', active);
-  }
-
-  function updatePracticeStats() {
-    const values = [['pianoSongScore', state.score], ['pianoSongHits', state.hits], ['pianoSongMisses', state.misses], ['pianoSongCombo', state.combo]];
-    values.forEach(pair => { const el = $('#' + pair[0]); if (el) el.textContent = String(pair[1]); });
-  }
-
-  function practiceHit(midi) {
-    if (!state.expected) return;
-    if (Number(state.expected) === Number(midi)) {
-      state.hits += 1;
-      state.combo += 1;
-      state.score += 100 + state.combo * 5;
-      const feedback = $('#pianoFeedback');
-      if (feedback) feedback.textContent = '✓ Correct · ' + noteLabel(midi);
-      const note = $('.fall-note[data-midi="' + midi + '"]');
-      if (note) note.classList.add('hit');
-      state.expected = null;
-    } else {
-      state.misses += 1;
-      state.combo = 0;
-      const feedback = $('#pianoFeedback');
-      if (feedback) feedback.textContent = '✕ Wrong note · try ' + noteLabel(Number(state.expected));
-    }
-    updatePracticeStats();
-  }
-
-  function triggerKey(midi, fromUser) {
-    const numeric = Number(midi);
-    if (numeric < pianoMin || numeric > pianoMax) return;
-    if (fromUser) {
-      ensureAudio();
-      playTone(numeric, state.sustain ? 4 : 1.6);
-      setKeyVisual(numeric, true);
-      window.setTimeout(() => { if (!state.sustain) setKeyVisual(numeric, false); }, 180);
-      practiceHit(numeric);
-    } else {
-      playTone(numeric, 1.05);
-      setKeyVisual(numeric, true);
-      window.setTimeout(() => setKeyVisual(numeric, false), 260);
-    }
-  }
-
-  function toggleSustain(force) {
-    state.sustain = typeof force === 'boolean' ? force : !state.sustain;
-    const labels = [$('#sustainToggle'), $('#sustainPedal')];
-    labels.forEach(el => { if (el) { el.textContent = state.sustain ? 'SUSTAIN: ON · Space' : 'SUSTAIN: OFF · Space'; el.classList.toggle('on', state.sustain); } });
-    if (!state.sustain) Array.from(state.activeVoices.keys()).forEach(releaseVoice);
-  }
-
-  function selectChord(midi) {
-    const numeric = Number(midi);
-    if (state.selectedChord.has(numeric)) state.selectedChord.delete(numeric);
-    else state.selectedChord.add(numeric);
-    setKeyVisual(numeric, state.selectedChord.has(numeric));
-    const text = $('#selectedChordNotes');
-    if (text) text.textContent = state.selectedChord.size ? Array.from(state.selectedChord).sort((a,b) => a-b).map(noteLabel).join(' · ') : 'No notes selected';
-  }
-
-  function playSelectedChord() {
-    const notes = Array.from(state.selectedChord);
-    if (!notes.length) { showToast('Pilih beberapa not dulu.'); return; }
-    notes.forEach(note => triggerKey(note, true));
-    showToast('Chord dimainkan: ' + notes.map(noteLabel).join(' · '));
-  }
-
-  function applyChord(name) {
-    state.selectedChord.clear();
-    (chordMap[name] || []).forEach(note => state.selectedChord.add(note));
-    $$('.white-key,.black-key').forEach(key => key.classList.remove('active'));
-    state.selectedChord.forEach(note => setKeyVisual(note, true));
-    const text = $('#selectedChordNotes');
-    if (text) text.textContent = name + ' · ' + Array.from(state.selectedChord).map(noteLabel).join(' · ');
-    if (!state.chordMode) {
-      state.chordMode = true;
-      updateChordMode();
-    }
-  }
-
-  function updateChordMode() {
-    const button = $('#chordModeToggle');
-    const label = $('#chordModeLabel');
-    if (button) button.textContent = state.chordMode ? 'Chord mode: ON' : 'Chord mode: OFF';
-    if (label) label.textContent = state.chordMode ? 'On' : 'Off';
-  }
-
-  function stopSong() {
-    window.clearInterval(state.songTimer);
-    state.songTimer = null;
-    state.expected = null;
-    $$('.fall-note').forEach(note => note.remove());
-    const feedback = $('#pianoFeedback');
-    if (feedback) feedback.textContent = 'Ready to play';
-  }
-
-  function addFallingNote(midi, index) {
-    const lane = $('#visualizerNotes');
-    if (!lane) return;
-    const note = document.createElement('div');
-    note.className = 'fall-note';
-    note.dataset.midi = String(midi);
-    note.style.left = (4 + (index % 18) * 5.1) + '%';
-    lane.appendChild(note);
-    window.setTimeout(() => note.remove(), 3800);
-  }
-
-  function startSong(name) {
-    stopSong();
-    if (name === 'free') { showToast('Free play aktif.'); return; }
-    const sequence = songs[name] || songs.cMajor;
-    const speed = Number($('#pianoSongSpeed') ? $('#pianoSongSpeed').value : 1) || 1;
-    state.songIndex = 0;
-    state.score = 0; state.hits = 0; state.misses = 0; state.combo = 0; updatePracticeStats();
-    const step = () => {
-      if (state.songIndex >= sequence.length) { stopSong(); showToast('Demo selesai.'); return; }
-      const midi = sequence[state.songIndex];
-      state.expected = midi;
-      addFallingNote(midi, state.songIndex);
-      const feedback = $('#pianoFeedback');
-      if (feedback) feedback.textContent = 'Play ' + noteLabel(midi);
-      state.songIndex += 1;
-    };
-    step();
-    state.songTimer = window.setInterval(step, 720 / speed);
-    showToast('Latihan dimulai. Ikuti note yang jatuh.');
-  }
-
-  function initPiano() {
-    if (state.pianoReady) return;
-    renderKeyboard();
-    const keyboard = $('#visualizerKeyboard');
-    if (keyboard) keyboard.addEventListener('pointerdown', event => {
-      const key = event.target.closest('[data-midi]');
-      if (!key) return;
-      event.preventDefault();
-      const midi = Number(key.dataset.midi);
-      if (state.chordMode) selectChord(midi);
-      else triggerKey(midi, true);
-    });
-    $$('.chord-preset').forEach(button => button.addEventListener('click', () => applyChord(button.dataset.chord)));
-    const playChord = $('#playSelectedChord');
-    if (playChord) playChord.addEventListener('click', playSelectedChord);
-    const clearChord = $('#clearSelectedChord');
-    if (clearChord) clearChord.addEventListener('click', () => { state.selectedChord.clear(); $$('.white-key,.black-key').forEach(key => key.classList.remove('active')); const text = $('#selectedChordNotes'); if (text) text.textContent = 'No notes selected'; });
-    const chordToggle = $('#chordModeToggle');
-    if (chordToggle) chordToggle.addEventListener('click', () => { state.chordMode = !state.chordMode; updateChordMode(); });
-    const sustainToggle = $('#sustainToggle');
-    if (sustainToggle) sustainToggle.addEventListener('click', () => toggleSustain());
-    const sustainPedal = $('#sustainPedal');
-    if (sustainPedal) sustainPedal.addEventListener('click', () => toggleSustain());
-    const start = $('#pianoSongStart');
-    if (start) start.addEventListener('click', () => startSong($('#pianoSongSelect').value));
-    const stop = $('#pianoSongStop');
-    if (stop) stop.addEventListener('click', stopSong);
-    const demo = $('#practiceDemo');
-    if (demo) demo.addEventListener('click', () => startSong('furElise'));
-    state.pianoReady = true;
-  }
-
-  function renderCards() {
-    const chordCards = $('#chordCards');
-    if (chordCards) {
-      ['C Major','A Minor','G Major','F Major','D Minor','E Minor'].forEach(name => {
-        const card = document.createElement('button');
-        card.type = 'button'; card.className = 'mini-card'; card.dataset.chordOpen = name.split(' ')[0];
-        card.innerHTML = '<div class="cover">♬</div><div><h3>' + name + '</h3><p>Open in piano visualizer</p></div>';
-        chordCards.appendChild(card);
-      });
-    }
-    const finderCards = $('#finderCards');
-    if (finderCards) {
-      [['Midnight Drive','Original demo','Cm · 120 BPM'],['Ocean Waves','Pop practice','G · 95 BPM'],['Falling Slowly','Ballad practice','D · 72 BPM'],['Good Riddance','Practice demo','G · 92 BPM']].forEach(item => {
-        const card = document.createElement('button');
-        card.type = 'button'; card.className = 'mini-card'; card.dataset.song = item[0];
-        card.innerHTML = '<div class="cover">♫</div><div><h3>' + item[0] + '</h3><p>' + item[1] + ' · ' + item[2] + '</p></div>';
-        finderCards.appendChild(card);
-      });
-    }
-    const wave = $('#wave');
-    if (wave) for (let i = 0; i < 52; i += 1) { const bar = document.createElement('i'); bar.style.height = (18 + (i * 17) % 47) + '%'; wave.appendChild(bar); }
-  }
-
-  function updateTonal(value) {
-    const data = keyData[value] || ['0♯','A Minor'];
-    const result = $('#tonalResult'); const sharp = $('#tonalSharp'); const minor = $('#relativeMinor');
-    if (result) result.textContent = value;
-    if (sharp) sharp.textContent = data[0];
-    if (minor) minor.textContent = data[1];
+    renderTonalSummary();
   }
 
   function setupMetronome() {

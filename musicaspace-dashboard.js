@@ -436,11 +436,12 @@
   const selectedChord=new Set();
   const chordModeButton=$('#chordModeToggle');
   const selectedChordNotes=$('#selectedChordNotes');
+  // Chord mode selector fix
   const updateChordSelection=()=>{
     const notes=Array.from(selectedChord).sort((a,b)=>a-b);
     if(selectedChordNotes) selectedChordNotes.textContent=notes.length?notes.map(midiName).join(' · '):'No notes selected';
-    $('.chord-preset').forEach(button=>button.classList.toggle('active',button.dataset.chord.split(',').map(Number).every(note=>selectedChord.has(note))&&notes.length===button.dataset.chord.split(',').length));
-    $('#visualizerKeyboard [data-midi]').forEach(key=>key.classList.toggle('chord-selected',selectedChord.has(Number(key.dataset.midi))));
+    Array.from(document.querySelectorAll('.chord-preset')).forEach(button=>button.classList.toggle('active',button.dataset.chord.split(',').map(Number).every(note=>selectedChord.has(note))&&notes.length===button.dataset.chord.split(',').length));
+    Array.from(document.querySelectorAll('#visualizerKeyboard [data-midi]')).forEach(key=>key.classList.toggle('chord-selected',selectedChord.has(Number(key.dataset.midi))));
   };
   const setChordMode=enabled=>{
     chordMode=Boolean(enabled);

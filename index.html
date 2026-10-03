@@ -140,6 +140,28 @@
     </main>
   </div>
   <div class="toast" id="toast"></div>
-  <script src="musicaspace-dashboard.js?v=20261003-audio10"></script>
+  <script src="musicaspace-dashboard.js?v=20261003-audio11"></script>
+  <!-- musicaspace-fallback-navigation -->
+  <script>
+  (() => {
+    const nodes = selector => Array.from(document.querySelectorAll(selector));
+    const showFallbackView = view => {
+      nodes('.view').forEach(section => section.classList.toggle('active', section.id === view + 'View'));
+      nodes('.nav-btn').forEach(button => button.classList.toggle('active', button.dataset.view === view));
+      window.scrollTo({top:0,behavior:'smooth'});
+    };
+    nodes('[data-view]').forEach(button => button.addEventListener('click', () => showFallbackView(button.dataset.view)));
+    nodes('.tool-launch').forEach(button => button.addEventListener('click', () => {
+      if (button.dataset.tool === 'Piano Visualizer') showFallbackView('pianoVisualizer');
+      else {
+        showFallbackView('tools');
+        const title = document.querySelector('#toolPanelTitle');
+        const text = document.querySelector('#toolPanelText');
+        if (title) title.textContent = button.dataset.tool;
+        if (text) text.textContent = button.dataset.tool + ' siap dipakai. Ini adalah ruang latihan interaktif Musica Space.';
+      }
+    }));
+  })();
+  </script>
 </body>
 </html>

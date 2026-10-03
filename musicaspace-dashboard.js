@@ -430,7 +430,46 @@
     const whiteCount=whiteMidi.length, blacks=[];
     for(let midi=pianoMinMidi;midi<=pianoMaxMidi;midi++) if([1,3,6,8,10].includes(midi%12)){const previous=whiteMidi.filter(item=>item<midi).length;const left=((previous-.35)/whiteCount)*100;blacks.push('<button class="visual-black" style="left:'+left+'%;width:'+Math.max(18,Math.round(100/whiteCount*0.62))+'px" data-midi="'+midi+'" data-note-name="'+midiName(midi)+'" type="button"><span>'+midiName(midi)+'</span></button>');}
     visualizerKeyboard.innerHTML=whites.join('')+blacks.join('');
+    if (typeof updateChordSelection==='function') updateChordSelection();
   };
+  let chordMode=false;
+  const selectedChord=new Set();
+  const chordModeButton=$('#chordModeToggle');
+  const selectedChordNotes=$('#selectedChordNotes');
+  const updateChordSelection=()=>{
+    const notes=Array.from(selectedChord).sort((a,b)=>a-b);
+    if(selectedChordNotes) selectedChordNotes.textContent=notes.length?notes.map(midiName).join(' · '):'No notes selected';
+    $('.chord-preset').forEach(button=>button.classList.toggle('active',button.dataset.chord.split(',').map(Number).every(note=>selectedChord.has(note))&&notes.length===button.dataset.chord.split(',').length));
+    $('#visualizerKeyboard [data-midi]').forEach(key=>key.classList.toggle('chord-selected',selectedChord.has(Number(key.dataset.midi))));
+  };
+  const setChordMode=enabled=>{
+    chordMode=Boolean(enabled);
+    if(chordModeButton){chordModeButton.classList.toggle('on',chordMode);chordModeButton.setAttribute('aria-pressed',String(chordMode));chordModeButton.textContent=chordMode?'Chord mode: On':'Chord mode: Off';}
+    if(chordMode) practiceMessage('Chord mode on · select several keys, then press Play chord');
+  };
+  const selectChordKey=key=>{
+    if(!key)return;
+    const midi=Number(key.dataset.midi);
+    if(selectedChord.has(midi)) selectedChord.delete(midi); else selectedChord.add(midi);
+    updateChordSelection();
+  };
+  const playSelectedChord=()=>{
+    const notes=Array.from(selectedChord).sort((a,b)=>a-b);
+    if(!notes.length){practiceMessage('Select at least two notes for a chord','bad');return;}
+    notes.forEach(midi=>{setPianoKeyActive(midi);playTone(midi-60,1.8);});
+    if(visualizerLastNote) visualizerLastNote.textContent='Playing chord · '+notes.map(midiName).join(' · ');
+    practiceMessage('Chord played · '+notes.map(midiName).join(' · '),'good');
+  };
+  chordModeButton?.addEventListener('click',()=>setChordMode(!chordMode));
+  $('#playSelectedChord')?.addEventListener('click',playSelectedChord);
+  $('#clearSelectedChord')?.addEventListener('click',()=>{selectedChord.clear();updateChordSelection();practiceMessage('Chord cleared');});
+  $('.chord-preset').forEach(button=>button.addEventListener('click',()=>{
+    selectedChord.clear();
+    button.dataset.chord.split(',').map(Number).forEach(note=>selectedChord.add(note));
+    setChordMode(true);
+    updateChordSelection();
+  }));
+  const handlePianoInput=key=>{if(chordMode)selectChordKey(key);else triggerPianoKey(key);};
   const triggerPianoKey = key => {
     if(!key)return;
     const midi=Number(key.dataset.midi);
@@ -468,8 +507,8 @@
   $('#pianoSongStart')?.addEventListener('click',startSongPractice);
   $('#pianoSongStop')?.addEventListener('click',()=>stopSongPractice('Practice stopped.'));
   $('#pianoSongDemo')?.addEventListener('click',demoPracticeSong);
-  visualizerKeyboard?.addEventListener('pointerdown',event=>{const key=event.target.closest('[data-midi]');if(key){event.preventDefault();triggerPianoKey(key);}});
-  window.addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)setSustain(!sustainEnabled);return;}if(event.repeat||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const midi=computerNoteMap[event.key.toLowerCase()];if(midi===undefined)return;const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');if(key){event.preventDefault();triggerPianoKey(key);}});
+  visualizerKeyboard?.addEventListener('pointerdown',event=>{const key=event.target.closest('[data-midi]');if(key){event.preventDefault();key.setPointerCapture?.(event.pointerId);handlePianoInput(key);}});
+  window.addEventListener('keydown',event=>{if(event.code==='Space'){event.preventDefault();if(!event.repeat)setSustain(!sustainEnabled);return;}if(event.repeat||['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const midi=computerNoteMap[event.key.toLowerCase()];if(midi===undefined)return;const key=visualizerKeyboard?.querySelector('[data-midi="'+midi+'"]');if(key){event.preventDefault();handlePianoInput(key);}});
   renderPracticeKeyboard();
 
   const tonalInput = $('#tonalAudio');

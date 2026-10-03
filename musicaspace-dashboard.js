@@ -407,7 +407,7 @@
     if(!songPracticeRunning)return;
     const current=visualizerNotes?.querySelector('[data-practice-index="'+(songPracticePosition-1)+'"]');
     if(midi===songPracticeExpected&&!songPracticeResolved){songPracticeResolved=true;songHits++;songCombo++;songScore+=100+(songCombo-1)*10;if(current){current.classList.add('hit');setTimeout(()=>current.remove(),180);}practiceMessage('✓ Correct · '+key.dataset.noteName,'good');}
-    else{songMisses++;songCombo=0;songScore=Math.max(0,songScore-25);practiceMessage('✕ Wrong note · follow the falling key','bad');}
+    else{key.classList.add('wrong');setTimeout(()=>key.classList.remove('wrong'),260);songMisses++;songCombo=0;songScore=Math.max(0,songScore-25);practiceMessage('✕ Wrong note · follow the falling key','bad');}
     updatePracticeStats();
   };
   const registerPracticeMiss = () => {

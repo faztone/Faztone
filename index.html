@@ -153,6 +153,58 @@
       color: #7f9ac6;
       font-size: .88rem;
     }
+    .lyrics-editor {
+      margin: 14px 0 18px;
+      border: 1px solid #20558f;
+      border-radius: 12px;
+      background: linear-gradient(145deg,#0a2044,#081a37);
+      overflow: hidden;
+    }
+    .lyrics-editor summary {
+      cursor: pointer;
+      padding: 13px 15px;
+      color: #dbeaff;
+      font-weight: 800;
+      list-style-position: inside;
+    }
+    .lyrics-editor-body { padding: 0 15px 15px; }
+    .lyrics-editor-body label {
+      display: block;
+      margin: 0 0 7px;
+      color: #a9c3f5;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+    .lyrics-editor-body textarea {
+      width: 100%;
+      min-height: 170px;
+      resize: vertical;
+      border: 1px solid #2863a5;
+      border-radius: 9px;
+      background: #06152e;
+      color: #eef5ff;
+      padding: 12px;
+      outline: 0;
+      font: 14px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    .lyrics-editor-body textarea:focus { border-color: #53cfff; box-shadow: 0 0 16px #278dff33; }
+    .lyrics-editor-help { margin: 8px 0 12px; color: #7f9ac6; font-size: .78rem; }
+    .lyrics-editor-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .lyrics-save-status { color: #42e6c4; font-size: .78rem; }
+    .chord-lyrics { display: grid; gap: 17px; padding: 4px 3px; }
+    .lyric-block { border-bottom: 1px solid #12365f; padding-bottom: 14px; }
+    .lyric-block:last-child { border-bottom: 0; padding-bottom: 0; }
+    .lyric-section-label { margin-bottom: 10px; color: #70caff; font-size: .72rem; font-weight: 900; letter-spacing: .14em; text-transform: uppercase; }
+    .lyric-row { min-height: 47px; overflow-x: auto; padding: 0 2px 4px; }
+    .lyric-chord-line, .lyric-text-line { display: flex; min-width: max-content; white-space: pre; }
+    .lyric-chord-line { min-height: 21px; color: #59ead0; font: 800 13px/1 ui-monospace,SFMono-Regular,Menlo,monospace; }
+    .lyric-text-line { color: #eef5ff; font-size: 15px; line-height: 1.5; }
+    .lyrics-empty { border: 1px dashed #2b609d; border-radius: 10px; padding: 16px; color: #9bb6df; background: #081a38; }
+    .lyrics-empty strong { display: block; color: #eef5ff; margin-bottom: 5px; }
+    @media (max-width: 680px) {
+      .lyric-text-line { font-size: 14px; }
+      .lyrics-editor-body textarea { min-height: 145px; }
+    }
     .transpose-status {
       color: #91b5ef;
       font-size: .9rem;
@@ -275,7 +327,20 @@
   </div>
   <div class="big-panel">
     <h2>Lyrics & Chords</h2>
-    <p class="transpose-status">Chord sheet ini memakai section lagu dan progression ringkas dari katalog. Lirik hanya bisa ditampilkan jika sumbernya berlisensi atau kamu menambahkannya sendiri.</p>
+    <p class="transpose-status">Format chord-sheet: chord di atas lirik, transpose otomatis, dan data lirik tersimpan di perangkat ini.</p>
+    <details class="lyrics-editor" id="lyricsEditor">
+      <summary>Tambahkan atau edit lirik + chord</summary>
+      <div class="lyrics-editor-body">
+        <label for="lyricsChordInput">Format yang dipakai</label>
+        <textarea id="lyricsChordInput" placeholder="[C]Tulis lirik di sini [G]lalu letakkan chord di atas katanya\n[Am]Baris berikutnya [F]seperti chord sheet biasa"></textarea>
+        <p class="lyrics-editor-help">Gunakan format <code>[C]teks lirik</code>. Pisahkan bagian lagu dengan baris kosong. Masukkan hanya lirik yang kamu miliki hak untuk ditampilkan.</p>
+        <div class="lyrics-editor-actions">
+          <button type="button" class="primary" id="saveLyricsChord">Simpan chord-sheet</button>
+          <button type="button" class="secondary" id="clearLyricsChord">Hapus</button>
+          <span class="lyrics-save-status" id="lyricsSaveStatus"></span>
+        </div>
+      </div>
+    </details>
     <div id="chordSections" class="chord-sections"></div>
   </div>
 </section>

@@ -26,7 +26,8 @@
     chordCatalog: [],
     chordCatalogLoaded: false,
     activeChordId: null,
-    chordTargetKey: null
+    chordTargetKey: null,
+    lyricsStore: {}
   };
 
   const noteNames = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -1128,6 +1129,87 @@
     const suffix = song && song.mode === 'minor' ? 'm' : '';
     return chordDisplayRoots.map(root => root + suffix);
   }
+
+  function loadLyricsStore() {
+    try {
+      const raw = window.localStorage.getItem('musica-space-lyrics-chords');
+      state.lyricsStore = raw ? JSON.parse(raw) : {};
+      if (!state.lyricsStore || typeof state.lyricsStore !== 'object') state.lyricsStore = {};
+    } catch (error) { state.lyricsStore = {}; }
+  }
+
+  function saveLyricsStore() {
+    try { window.localStorage.setItem('musica-space-lyrics-chords', JSON.stringify(state.lyricsStore)); }
+    catch (error) { showToast('Penyimpanan lokal tidak tersedia di browser ini.'); }
+  }
+
+  function getSongLyrics(song) {
+    if (!song) return '';
+    if (typeof state.lyricsStore[song.id] === 'string') return state.lyricsStore[song.id];
+    if (typeof song.lyrics === 'string') return song.lyrics;
+    return '';
+  }
+
+  function parseChordLyricLine(line, offset) {
+    const source = String(line || '');
+    const tokens = [];
+    const regex = /\[([^\]]+)\]/g;
+    let match;
+    let cursor = 0;
+    let text = '';
+    while ((match = regex.exec(source))) {
+      text += source.slice(cursor, match.index);
+      tokens.push({ chord: transposeChordSymbol(match[1], offset), textIndex: text.length });
+      cursor = regex.lastIndex;
+    }
+    text += source.slice(cursor);
+    if (!tokens.length) return { chordLine: '', textLine: text };
+    let chordLine = '';
+    let chordCursor = 0;
+    tokens.forEach(token => {
+      chordLine += ' '.repeat(Math.max(0, token.textIndex - chordCursor)) + token.chord;
+      chordCursor = token.textIndex;
+    });
+    return { chordLine, textLine: text };
+  }
+
+  function renderChordLyrics(rawLyrics, offset) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chord-lyrics';
+    const blocks = String(rawLyrics || '').trim().split(/\n\s*\n/).filter(Boolean);
+    blocks.forEach((block, blockIndex) => {
+      const section = document.createElement('div');
+      section.className = 'lyric-block';
+      const label = document.createElement('div');
+      label.className = 'lyric-section-label';
+      label.textContent = blockIndex === 0 ? 'Lyrics & Chords' : 'Next section';
+      section.appendChild(label);
+      block.split('\n').forEach(line => {
+        const parsed = parseChordLyricLine(line, offset);
+        const row = document.createElement('div');
+        row.className = 'lyric-row';
+        const chordLine = document.createElement('div');
+        chordLine.className = 'lyric-chord-line';
+        chordLine.textContent = parsed.chordLine;
+        const textLine = document.createElement('div');
+        textLine.className = 'lyric-text-line';
+        textLine.textContent = parsed.textLine;
+        row.appendChild(chordLine);
+        row.appendChild(textLine);
+        section.appendChild(row);
+      });
+      wrapper.appendChild(section);
+    });
+    return wrapper;
+  }
+
+  function syncLyricsEditor(song) {
+    const input = $('#lyricsChordInput');
+    const status = $('#lyricsSaveStatus');
+    const value = getSongLyrics(song);
+    if (input) input.value = value;
+    if (status) status.textContent = value ? 'Tersimpan di perangkat ini' : '';
+  }
   function romanToChord(token, targetRoot, mode) {
     const text = String(token || '').replace(/[()]/g, '').trim();
     const match = text.match(/^([b#]*)([ivIV]+)(.*)$/);
@@ -1154,15 +1236,19 @@
       ? song.section_patterns
       : { main_loop: song.core_progression || [] };
     target.innerHTML = '';
+    const rawLyrics = getSongLyrics(song);
+    if (rawLyrics) {
+      target.appendChild(renderChordLyrics(rawLyrics, offset));
+      return;
+    }
     Object.keys(sections).forEach(sectionName => {
       const sourceChords = Array.isArray(sections[sectionName]) ? sections[sectionName] : [];
       const chords = sourceChords.map(chord => transposeChordSymbol(chord, offset));
       const wrapper = document.createElement('article');
       wrapper.className = 'chord-section';
-      wrapper.innerHTML = '<h3></h3><div class="chord-line"></div><p class="chord-placeholder"></p>';
+      wrapper.innerHTML = '<h3></h3><div class="chord-line"></div>';
       const heading = wrapper.querySelector('h3');
       const line = wrapper.querySelector('.chord-line');
-      const placeholder = wrapper.querySelector('.chord-placeholder');
       if (heading) heading.textContent = sectionName.replace(/_/g, ' ');
       chords.forEach(chord => {
         const chip = document.createElement('span');
@@ -1170,9 +1256,12 @@
         chip.textContent = chord;
         if (line) line.appendChild(chip);
       });
-      if (placeholder) placeholder.textContent = 'Lirik belum tersedia di katalog · gunakan progression ini sebagai chord reference.';
       target.appendChild(wrapper);
     });
+    const empty = document.createElement('div');
+    empty.className = 'lyrics-empty';
+    empty.innerHTML = '<strong>Belum ada lirik untuk lagu ini</strong><span>Tekan “Tambahkan atau edit lirik + chord” di atas untuk membuat chord-sheet seperti situs chord biasa.</span>';
+    target.appendChild(empty);
   }
   function renderChordDetail(id) {
     const song = state.chordCatalog.find(item => item.id === id);
@@ -1205,6 +1294,7 @@
         select.appendChild(el);
       });
     }
+    syncLyricsEditor(song);
     renderChordSections(song, targetKey);
     const status = $('#chordTransposeStatus');
     if (status) status.textContent = targetKey === song.key ? 'Original key' : 'Transposed from ' + song.key;
@@ -1228,6 +1318,29 @@
     if (down) down.addEventListener('click', () => moveChordTranspose(-1));
     const up = $('#chordTransposeUp');
     if (up) up.addEventListener('click', () => moveChordTranspose(1));
+    const save = $('#saveLyricsChord');
+    if (save) save.addEventListener('click', () => {
+      const song = state.chordCatalog.find(item => item.id === state.activeChordId);
+      const input = $('#lyricsChordInput');
+      if (!song || !input) return;
+      const value = input.value.trim();
+      if (value) state.lyricsStore[song.id] = value;
+      else delete state.lyricsStore[song.id];
+      saveLyricsStore();
+      renderChordDetail(song.id);
+      const editor = $('#lyricsEditor');
+      if (editor) editor.open = false;
+      showToast(value ? 'Chord-sheet tersimpan di perangkat ini.' : 'Chord-sheet dikosongkan.');
+    });
+    const clear = $('#clearLyricsChord');
+    if (clear) clear.addEventListener('click', () => {
+      const song = state.chordCatalog.find(item => item.id === state.activeChordId);
+      if (!song) return;
+      delete state.lyricsStore[song.id];
+      saveLyricsStore();
+      renderChordDetail(song.id);
+      showToast('Data lirik lagu ini dihapus dari perangkat.');
+    });
   }
   function openCatalogSong(id) {
     state.activeChordId = id;
@@ -1317,6 +1430,7 @@
   }
 
   replaceIcons();
+  loadLyricsStore();
   renderCards();
   setupChordLibrary();
   setupChordDetail();
